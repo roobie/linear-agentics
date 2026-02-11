@@ -62,7 +62,9 @@ class TestAuditTrail:
 
     def test_to_table(self):
         trail = AuditTrail()
-        proof = Proof("my-token", "shell:echo", {}, "2025-01-01T00:00:00Z", "hello world", 42.0)
+        proof = Proof(
+            "my-token", "shell:echo", {}, "2025-01-01T00:00:00Z", "hello world", 42.0
+        )
         trail.record_proof(proof)
         trail.record_error("bad-token", RuntimeError("failed"))
 

@@ -211,9 +211,7 @@ def _validate_query(query: str, allowed_patterns: list[str]) -> None:
             "Query contains ';' — multi-statement queries are not allowed"
         )
     if _SQL_COMMENT_RE.search(query):
-        raise QueryNotAllowedError(
-            "Query contains SQL comments — not allowed"
-        )
+        raise QueryNotAllowedError("Query contains SQL comments — not allowed")
     normalised = " ".join(query.split()).strip()
     for pattern in allowed_patterns:
         pattern_normalised = " ".join(pattern.split()).strip()
@@ -246,9 +244,7 @@ async def db_query(
 
     _validate_query(query, allowed_patterns)
 
-    conn = await asyncio.wait_for(
-        asyncpg.connect(dsn), timeout=timeout_seconds
-    )
+    conn = await asyncio.wait_for(asyncpg.connect(dsn), timeout=timeout_seconds)
     try:
         params = params or []
         result = await asyncio.wait_for(

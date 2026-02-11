@@ -26,41 +26,43 @@ from linear_agentics.tokens import MultiUseShellToken
 
 
 async def main():
-    capabilities = CapabilitySet([
-        # Read-only diagnostics (3 uses each for iterative debugging)
-        MultiUseShellToken(
-            "read-pods",
-            allowed=["kubectl get pods", "kubectl describe pod"],
-            max_uses=3,
-        ),
-        MultiUseShellToken(
-            "read-logs",
-            allowed=["kubectl logs"],
-            max_uses=3,
-        ),
-        # Health check — single use
-        HttpToken(
-            "check-health",
-            url="https://api.internal/health",
-            methods=["GET"],
-        ),
-        # Deployments
-        DeployToken(
-            "deploy-staging",
-            method="kubectl",
-            target="staging",
-            image="myservice:v2.3.1",
-            requires_approval=False,
-        ),
-        DeployToken(
-            "deploy-prod",
-            method="kubectl",
-            target="production",
-            image="myservice:v2.3.1",
-            rollback_to="myservice:v2.3.0",
-            requires_approval=True,  # Human must approve prod deploys
-        ),
-    ])
+    capabilities = CapabilitySet(
+        [
+            # Read-only diagnostics (3 uses each for iterative debugging)
+            MultiUseShellToken(
+                "read-pods",
+                allowed=["kubectl get pods", "kubectl describe pod"],
+                max_uses=3,
+            ),
+            MultiUseShellToken(
+                "read-logs",
+                allowed=["kubectl logs"],
+                max_uses=3,
+            ),
+            # Health check — single use
+            HttpToken(
+                "check-health",
+                url="https://api.internal/health",
+                methods=["GET"],
+            ),
+            # Deployments
+            DeployToken(
+                "deploy-staging",
+                method="kubectl",
+                target="staging",
+                image="myservice:v2.3.1",
+                requires_approval=False,
+            ),
+            DeployToken(
+                "deploy-prod",
+                method="kubectl",
+                target="production",
+                image="myservice:v2.3.1",
+                rollback_to="myservice:v2.3.0",
+                requires_approval=True,  # Human must approve prod deploys
+            ),
+        ]
+    )
 
     budget = Budget(max_steps=20, timeout_minutes=15)
 

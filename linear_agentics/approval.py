@@ -32,9 +32,9 @@ class ApprovalGate:
 
         Blocks until the user responds or times out.
         """
-        print(f"\n{'='*60}", file=sys.stderr)
+        print(f"\n{'=' * 60}", file=sys.stderr)
         print(f"APPROVAL REQUIRED: {token_name}", file=sys.stderr)
-        print(f"{'='*60}", file=sys.stderr)
+        print(f"{'=' * 60}", file=sys.stderr)
         print(f"\n{message}\n", file=sys.stderr)
         print(f"Type 'yes' to approve or 'no' to deny:", file=sys.stderr)
 

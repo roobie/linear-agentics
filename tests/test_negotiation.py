@@ -24,11 +24,13 @@ class StubProvider:
         self.calls: list[dict] = []
 
     async def request_capability(self, requested_scope, justification, candidates):
-        self.calls.append({
-            "scope": requested_scope,
-            "justification": justification,
-            "candidates": candidates,
-        })
+        self.calls.append(
+            {
+                "scope": requested_scope,
+                "justification": justification,
+                "candidates": candidates,
+            }
+        )
         return self._grant
 
 
@@ -166,12 +168,12 @@ class TestAgentNegotiation:
             {"scope": "shell:ls", "justification": "need to list files"},
             "c1",
         )
-        use_call = _make_tool_response(
-            "shell_ls-cmd", {"command": "ls"}, "c2"
-        )
+        use_call = _make_tool_response("shell_ls-cmd", {"command": "ls"}, "c2")
         done = _make_text_response("Done.")
 
-        with patch.object(agent._client.messages, "create", new_callable=AsyncMock) as mock_create:
+        with patch.object(
+            agent._client.messages, "create", new_callable=AsyncMock
+        ) as mock_create:
             mock_create.side_effect = [req_call, use_call, done]
             result = await agent.run()
 
@@ -204,7 +206,9 @@ class TestAgentNegotiation:
         )
         done = _make_text_response("Ok, working without it.")
 
-        with patch.object(agent._client.messages, "create", new_callable=AsyncMock) as mock_create:
+        with patch.object(
+            agent._client.messages, "create", new_callable=AsyncMock
+        ) as mock_create:
             mock_create.side_effect = [req_call, done]
             result = await agent.run()
 
@@ -243,7 +247,9 @@ class TestAgentNegotiation:
         )
         done = _make_text_response("Done.")
 
-        with patch.object(agent._client.messages, "create", new_callable=AsyncMock) as mock_create:
+        with patch.object(
+            agent._client.messages, "create", new_callable=AsyncMock
+        ) as mock_create:
             mock_create.side_effect = [req1, req2, done]
             result = await agent.run()
 
@@ -264,10 +270,12 @@ class TestAgentNegotiation:
         # No provider, but we manually call the handler
         agent = Agent(capabilities=caps, budget=budget, system_prompt="test")
 
-        result = await agent._handle_capability_request({
-            "scope": "shell:ls",
-            "justification": "need it",
-        })
+        result = await agent._handle_capability_request(
+            {
+                "scope": "shell:ls",
+                "justification": "need it",
+            }
+        )
 
         assert "not configured" in result
         initial._consumed = True
@@ -281,7 +289,9 @@ class TestAgentNegotiation:
 
         done = _make_text_response("Hello.")
 
-        with patch.object(agent._client.messages, "create", new_callable=AsyncMock) as mock_create:
+        with patch.object(
+            agent._client.messages, "create", new_callable=AsyncMock
+        ) as mock_create:
             mock_create.return_value = done
             await agent.run()
 
@@ -310,7 +320,9 @@ class TestAgentNegotiation:
 
         done = _make_text_response("Hello.")
 
-        with patch.object(agent._client.messages, "create", new_callable=AsyncMock) as mock_create:
+        with patch.object(
+            agent._client.messages, "create", new_callable=AsyncMock
+        ) as mock_create:
             mock_create.return_value = done
             await agent.run()
 
@@ -343,11 +355,14 @@ class TestAgentNegotiation:
         )
         done = _make_text_response("Done.")
 
-        with patch.object(agent._client.messages, "create", new_callable=AsyncMock) as mock_create:
+        with patch.object(
+            agent._client.messages, "create", new_callable=AsyncMock
+        ) as mock_create:
             mock_create.side_effect = [req_call, done]
             result = await agent.run()
 
         import json
+
         trail = json.loads(result.audit_trail.to_json())
         assert "negotiations" in trail
         assert len(trail["negotiations"]) == 1

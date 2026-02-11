@@ -16,23 +16,29 @@ from linear_agentics.tokens import MultiUseShellToken
 
 
 async def main():
-    capabilities = CapabilitySet([
-        MultiUseShellToken(
-            "read-pods",
-            allowed=["kubectl get pods", "kubectl describe pod", "kubectl get events"],
-            max_uses=5,
-        ),
-        MultiUseShellToken(
-            "read-logs",
-            allowed=["kubectl logs"],
-            max_uses=5,
-        ),
-        HttpToken(
-            "check-health",
-            url="https://api.internal/health",
-            methods=["GET"],
-        ),
-    ])
+    capabilities = CapabilitySet(
+        [
+            MultiUseShellToken(
+                "read-pods",
+                allowed=[
+                    "kubectl get pods",
+                    "kubectl describe pod",
+                    "kubectl get events",
+                ],
+                max_uses=5,
+            ),
+            MultiUseShellToken(
+                "read-logs",
+                allowed=["kubectl logs"],
+                max_uses=5,
+            ),
+            HttpToken(
+                "check-health",
+                url="https://api.internal/health",
+                methods=["GET"],
+            ),
+        ]
+    )
 
     budget = Budget(max_steps=15, timeout_minutes=10)
 

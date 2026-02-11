@@ -101,44 +101,48 @@ class Agent:
         tools = self.capabilities.to_tool_definitions()
 
         # Add the request_approval meta-tool
-        tools.append({
-            "name": "request_approval",
-            "description": "Ask the human operator for approval before proceeding with a sensitive action.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "message": {
-                        "type": "string",
-                        "description": "Message explaining what you want to do and why",
-                    }
-                },
-                "required": ["message"],
-            },
-        })
-
-        if self.capability_provider and self.candidate_tokens:
-            tools.append({
-                "name": "request_capability",
-                "description": (
-                    "Request an additional capability you don't currently have. "
-                    f"{self.max_negotiations} requests allowed per run. "
-                    "Provide the scope you need and justify why."
-                ),
+        tools.append(
+            {
+                "name": "request_approval",
+                "description": "Ask the human operator for approval before proceeding with a sensitive action.",
                 "input_schema": {
                     "type": "object",
                     "properties": {
-                        "scope": {
+                        "message": {
                             "type": "string",
-                            "description": "The capability scope needed",
-                        },
-                        "justification": {
-                            "type": "string",
-                            "description": "Why you need this capability",
-                        },
+                            "description": "Message explaining what you want to do and why",
+                        }
                     },
-                    "required": ["scope", "justification"],
+                    "required": ["message"],
                 },
-            })
+            }
+        )
+
+        if self.capability_provider and self.candidate_tokens:
+            tools.append(
+                {
+                    "name": "request_capability",
+                    "description": (
+                        "Request an additional capability you don't currently have. "
+                        f"{self.max_negotiations} requests allowed per run. "
+                        "Provide the scope you need and justify why."
+                    ),
+                    "input_schema": {
+                        "type": "object",
+                        "properties": {
+                            "scope": {
+                                "type": "string",
+                                "description": "The capability scope needed",
+                            },
+                            "justification": {
+                                "type": "string",
+                                "description": "Why you need this capability",
+                            },
+                        },
+                        "required": ["scope", "justification"],
+                    },
+                }
+            )
 
         messages: list[dict] = []
         final_message = ""
@@ -183,11 +187,13 @@ class Agent:
                     result_text = await self._handle_tool_call(
                         tool_use.name, tool_use.input
                     )
-                    tool_results.append({
-                        "type": "tool_result",
-                        "tool_use_id": tool_use.id,
-                        "content": result_text,
-                    })
+                    tool_results.append(
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": tool_use.id,
+                            "content": result_text,
+                        }
+                    )
 
                 messages.append({"role": "user", "content": tool_results})
 
@@ -297,4 +303,6 @@ class Agent:
         # Add granted token to the live capability set
         self.capabilities.add_token(granted)
         self._audit.record_negotiation(_make_record(granted.name))
-        return f"Capability granted: {granted.name} ({granted.scope}). You can now use it."
+        return (
+            f"Capability granted: {granted.name} ({granted.scope}). You can now use it."
+        )

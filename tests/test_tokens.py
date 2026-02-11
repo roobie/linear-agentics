@@ -90,21 +90,29 @@ class TestHttpToken:
     async def test_consume_with_mock(self):
         token = HttpToken("health", url="https://example.com/health", methods=["GET"])
         mock_result = {"status": 200, "body": "ok"}
-        with patch("linear_agentics.tokens.http_request", new_callable=AsyncMock) as mock_req:
+        with patch(
+            "linear_agentics.tokens.http_request", new_callable=AsyncMock
+        ) as mock_req:
             mock_req.return_value = mock_result
             proof = await token.consume(method="GET")
             mock_req.assert_called_once_with(
                 "https://example.com/health", "GET", ["GET"], body=None
             )
         assert proof.token_name == "health"
-        assert proof.args == {"method": "GET", "url": "https://example.com/health", "body": None}
+        assert proof.args == {
+            "method": "GET",
+            "url": "https://example.com/health",
+            "body": None,
+        }
         assert "HTTP 200" in proof.result_summary
         assert token.consumed
 
     async def test_consume_default_method(self):
         token = HttpToken("api", url="https://example.com/api", methods=["POST", "GET"])
         mock_result = {"status": 201, "body": "created"}
-        with patch("linear_agentics.tokens.http_request", new_callable=AsyncMock) as mock_req:
+        with patch(
+            "linear_agentics.tokens.http_request", new_callable=AsyncMock
+        ) as mock_req:
             mock_req.return_value = mock_result
             proof = await token.consume()
             # Default method should be the first in the list
@@ -116,7 +124,9 @@ class TestHttpToken:
     async def test_consume_with_body(self):
         token = HttpToken("api", url="https://example.com/api", methods=["POST"])
         mock_result = {"status": 200, "body": "ok"}
-        with patch("linear_agentics.tokens.http_request", new_callable=AsyncMock) as mock_req:
+        with patch(
+            "linear_agentics.tokens.http_request", new_callable=AsyncMock
+        ) as mock_req:
             mock_req.return_value = mock_result
             proof = await token.consume(method="POST", body={"key": "value"})
             mock_req.assert_called_once_with(
@@ -139,7 +149,9 @@ class TestHttpToken:
         token._consumed = True
 
     async def test_to_tool_definition_with_approval(self):
-        token = HttpToken("api", url="https://example.com", methods=["POST"], requires_approval=True)
+        token = HttpToken(
+            "api", url="https://example.com", methods=["POST"], requires_approval=True
+        )
         tool_def = token.to_tool_definition()
         assert "REQUIRES APPROVAL" in tool_def["description"]
         token._consumed = True
@@ -179,8 +191,12 @@ class TestDeployToken:
         token._consumed = True
 
     async def test_consume_with_mock(self):
-        token = DeployToken("staging", method="kubectl", target="staging", image="app:v1")
-        with patch("linear_agentics.tokens.shell_exec", new_callable=AsyncMock) as mock_exec:
+        token = DeployToken(
+            "staging", method="kubectl", target="staging", image="app:v1"
+        )
+        with patch(
+            "linear_agentics.tokens.shell_exec", new_callable=AsyncMock
+        ) as mock_exec:
             mock_exec.return_value = "deployment.apps/app image updated"
             proof = await token.consume()
             mock_exec.assert_called_once()
@@ -189,7 +205,11 @@ class TestDeployToken:
             assert "app:v1" in call_args[0][0]
             assert "--namespace=staging" in call_args[0][0]
         assert proof.token_name == "staging"
-        assert proof.args == {"method": "kubectl", "target": "staging", "image": "app:v1"}
+        assert proof.args == {
+            "method": "kubectl",
+            "target": "staging",
+            "image": "app:v1",
+        }
         assert "Deployed app:v1 to staging" in proof.result_summary
         assert token.consumed
 
@@ -379,7 +399,9 @@ class TestSecretToken:
             inner_token=inner,
         )
         mock_result = {"status": 200, "body": "ok"}
-        with patch("linear_agentics.tokens.http_request", new_callable=AsyncMock) as mock_req:
+        with patch(
+            "linear_agentics.tokens.http_request", new_callable=AsyncMock
+        ) as mock_req:
             mock_req.return_value = mock_result
             proof = await token.consume(method="POST", body={"action": "deploy"})
 
@@ -405,7 +427,9 @@ class TestSecretToken:
             injection=SecretInjection(kind="env", key="DATABASE_URL"),
             inner_token=inner,
         )
-        with patch("linear_agentics.tokens.shell_exec_with_env", new_callable=AsyncMock) as mock_exec:
+        with patch(
+            "linear_agentics.tokens.shell_exec_with_env", new_callable=AsyncMock
+        ) as mock_exec:
             mock_exec.return_value = "Migrations applied"
             proof = await token.consume(command="python manage.py migrate")
 
@@ -471,7 +495,9 @@ class TestDatabaseToken:
             allowed_patterns=["SELECT"],
         )
         mock_rows = [{"id": 1, "name": "alice"}]
-        with patch("linear_agentics.tokens.db_query", new_callable=AsyncMock) as mock_db:
+        with patch(
+            "linear_agentics.tokens.db_query", new_callable=AsyncMock
+        ) as mock_db:
             mock_db.return_value = mock_rows
             proof = await token.consume(
                 query="SELECT * FROM users WHERE id = $1", params=[1]
@@ -527,7 +553,9 @@ class TestMultiUseDatabaseToken:
             allowed_patterns=["SELECT"],
             max_uses=3,
         )
-        with patch("linear_agentics.tokens.db_query", new_callable=AsyncMock) as mock_db:
+        with patch(
+            "linear_agentics.tokens.db_query", new_callable=AsyncMock
+        ) as mock_db:
             mock_db.return_value = [{"count": 42}]
             await token.consume(query="SELECT count(*) FROM users")
             assert token.uses_remaining == 2
@@ -543,7 +571,9 @@ class TestMultiUseDatabaseToken:
             allowed_patterns=["SELECT"],
             max_uses=1,
         )
-        with patch("linear_agentics.tokens.db_query", new_callable=AsyncMock) as mock_db:
+        with patch(
+            "linear_agentics.tokens.db_query", new_callable=AsyncMock
+        ) as mock_db:
             mock_db.return_value = []
             await token.consume(query="SELECT 1")
             with pytest.raises(TokenReusedError, match="exhausted"):
@@ -556,7 +586,9 @@ class TestWaitToken:
         return WaitToken("pause", max_seconds=60)
 
     async def test_consume_sleeps(self, wait_token):
-        with patch("linear_agentics.tokens.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+        with patch(
+            "linear_agentics.tokens.asyncio.sleep", new_callable=AsyncMock
+        ) as mock_sleep:
             proof = await wait_token.consume(seconds=5, reason="waiting for deploy")
             mock_sleep.assert_called_once_with(5)
         assert "Waited 5s" in proof.result_summary

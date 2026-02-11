@@ -25,18 +25,20 @@ from linear_agentics.tokens import MultiUseShellToken
 
 async def main():
     # Initial capabilities — read-only diagnostics
-    capabilities = CapabilitySet([
-        MultiUseShellToken(
-            "read-logs",
-            allowed=["kubectl logs", "kubectl get pods"],
-            max_uses=3,
-        ),
-        HttpToken(
-            "check-health",
-            url="https://api.internal/health",
-            methods=["GET"],
-        ),
-    ])
+    capabilities = CapabilitySet(
+        [
+            MultiUseShellToken(
+                "read-logs",
+                allowed=["kubectl logs", "kubectl get pods"],
+                max_uses=3,
+            ),
+            HttpToken(
+                "check-health",
+                url="https://api.internal/health",
+                methods=["GET"],
+            ),
+        ]
+    )
 
     # Candidate tokens — can be granted during execution if the agent requests them
     candidates = [

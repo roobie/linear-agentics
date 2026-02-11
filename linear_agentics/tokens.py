@@ -63,7 +63,9 @@ class LinearToken:
     def proof(self) -> Proof | None:
         return self._proof
 
-    def _mark_consumed(self, args: dict, result_summary: str, duration_ms: float) -> Proof:
+    def _mark_consumed(
+        self, args: dict, result_summary: str, duration_ms: float
+    ) -> Proof:
         self._consumed = True
         self._proof = Proof(
             token_name=self.name,
@@ -152,7 +154,9 @@ class HttpToken(LinearToken):
         self.url = url
         self.methods = methods
 
-    async def consume(self, method: str | None = None, body: dict | None = None) -> Proof:
+    async def consume(
+        self, method: str | None = None, body: dict | None = None
+    ) -> Proof:
         self._check_reuse()
         if method is None:
             method = self.methods[0]
@@ -169,8 +173,7 @@ class HttpToken(LinearToken):
         return {
             "name": self.name,
             "description": (
-                f"{'/'.join(self.methods)} {self.url}. "
-                f"ONE USE ONLY.{approval_note}"
+                f"{'/'.join(self.methods)} {self.url}. ONE USE ONLY.{approval_note}"
             ),
             "input_schema": {
                 "type": "object",
@@ -209,8 +212,7 @@ class DeployToken(LinearToken):
         self.image = image
         self.rollback_to = rollback_to
         self._deploy_command = (
-            f"kubectl set image deployment/app app={image} "
-            f"--namespace={target}"
+            f"kubectl set image deployment/app app={image} --namespace={target}"
         )
         self._rollback_command: str | None = None
         if rollback_to:
@@ -539,7 +541,7 @@ class SecretInjection:
     """Describes how a secret is injected into an action."""
 
     kind: str  # "header" or "env"
-    key: str   # header name or env var name
+    key: str  # header name or env var name
 
 
 class SecretToken(LinearToken):
@@ -580,7 +582,11 @@ class SecretToken(LinearToken):
             body = kwargs.get("body")
             headers = {self.injection.key: self._secret_value}
             result = await http_request(
-                inner.url, method, inner.methods, body=body, headers=headers,
+                inner.url,
+                method,
+                inner.methods,
+                body=body,
+                headers=headers,
             )
             result_summary = f"HTTP {result['status']}: {result['body'][:150]}"
 
@@ -595,14 +601,14 @@ class SecretToken(LinearToken):
             command = kwargs["command"]
             env_vars = {self.injection.key: self._secret_value}
             result_str = await shell_exec_with_env(
-                command, inner.allowed, env_vars,
+                command,
+                inner.allowed,
+                env_vars,
             )
             result_summary = result_str[:200] if result_str else "(empty)"
 
         else:
-            raise TokenScopeError(
-                f"Unknown injection kind: {self.injection.kind!r}"
-            )
+            raise TokenScopeError(f"Unknown injection kind: {self.injection.kind!r}")
 
         duration = (time.monotonic() - t0) * 1000
         # Redact: never include secret in proof args
@@ -708,9 +714,7 @@ class MultiUseDatabaseToken(MultiUseToken):
         rows = await db_query(self._dsn, query, params, self.allowed_patterns)
         duration = (time.monotonic() - t0) * 1000
         summary = str(rows)[:200]
-        return self._record_use(
-            {"query": query, "params": params}, summary, duration
-        )
+        return self._record_use({"query": query, "params": params}, summary, duration)
 
     def to_tool_definition(self) -> dict:
         approval_note = " REQUIRES APPROVAL." if self.requires_approval else ""

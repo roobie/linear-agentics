@@ -68,7 +68,9 @@ class TestFileReadWrite:
 
     async def test_read_rejects_traversal(self, tmp_path):
         with pytest.raises(FileAccessError):
-            await file_read(str(tmp_path / ".." / ".." / "etc" / "passwd"), [str(tmp_path)])
+            await file_read(
+                str(tmp_path / ".." / ".." / "etc" / "passwd"), [str(tmp_path)]
+            )
 
 
 class TestValidateQuery:

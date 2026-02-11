@@ -46,9 +46,7 @@ _path_alphabet = st.sampled_from(list("abcde./\\  \x00"))
 _path_segments = st.text(alphabet="abcde./", min_size=0, max_size=20)
 
 # Characters likely to appear in shell commands
-_shell_chars = st.sampled_from(
-    list("abcdefg -='\"|&;$()` \t\\")
-)
+_shell_chars = st.sampled_from(list("abcdefg -='\"|&;$()` \t\\"))
 _shell_commands = st.text(alphabet=_shell_chars, min_size=1, max_size=60)
 
 # SQL-like strings
@@ -79,9 +77,8 @@ class TestPropertyValidateFilePath:
         resolved = os.path.realpath(test_path)
         allowed_resolved = os.path.realpath(sandbox)
 
-        is_inside = (
-            resolved == allowed_resolved
-            or resolved.startswith(allowed_resolved + os.sep)
+        is_inside = resolved == allowed_resolved or resolved.startswith(
+            allowed_resolved + os.sep
         )
 
         if is_inside:
@@ -196,9 +193,13 @@ class TestPropertyValidateQuery:
         ws_between=st.text(alphabet=" \t\n", min_size=1, max_size=5),
         ws_after=st.text(alphabet=" \t\n", min_size=0, max_size=5),
     )
-    def test_whitespace_normalisation_is_idempotent(self, ws_before, ws_between, ws_after):
+    def test_whitespace_normalisation_is_idempotent(
+        self, ws_before, ws_between, ws_after
+    ):
         """Whitespace variations of the same query all match the same prefix."""
-        query = f"{ws_before}SELECT{ws_between}*{ws_between}FROM{ws_between}users{ws_after}"
+        query = (
+            f"{ws_before}SELECT{ws_between}*{ws_between}FROM{ws_between}users{ws_after}"
+        )
         # Should pass — it normalizes to "SELECT * FROM users"
         _validate_query(query, ["SELECT * FROM users"])
 
@@ -241,9 +242,7 @@ class TestPropertySecretRedaction:
             f"Secret leaked as value in proof.args"
         )
         # Secret must not appear as a key in proof.args
-        assert secret not in proof.args, (
-            f"Secret leaked as key in proof.args"
-        )
+        assert secret not in proof.args, f"Secret leaked as key in proof.args"
         inner._consumed = True
 
     @given(secret=st.text(min_size=8, max_size=100))
@@ -266,9 +265,7 @@ class TestPropertySecretRedaction:
         assert secret not in proof.args.values(), (
             f"Secret leaked as value in proof.args"
         )
-        assert secret not in proof.args, (
-            f"Secret leaked as key in proof.args"
-        )
+        assert secret not in proof.args, f"Secret leaked as key in proof.args"
         inner._consumed = True
 
     @given(secret=st.text(min_size=8, max_size=100))
@@ -286,9 +283,7 @@ class TestPropertySecretRedaction:
         def _check_no_secret(obj, path=""):
             """Recursively check that secret doesn't appear in any string value."""
             if isinstance(obj, str):
-                assert secret not in obj, (
-                    f"Secret leaked at {path}: {obj!r}"
-                )
+                assert secret not in obj, f"Secret leaked at {path}: {obj!r}"
             elif isinstance(obj, dict):
                 for k, v in obj.items():
                     _check_no_secret(v, f"{path}.{k}")
@@ -534,7 +529,9 @@ class TestPropertyAuditTrailJsonRoundtrip:
 
     @given(
         proofs=st.lists(
-            st.tuples(st.text(min_size=1, max_size=10), st.text(min_size=0, max_size=20)),
+            st.tuples(
+                st.text(min_size=1, max_size=10), st.text(min_size=0, max_size=20)
+            ),
             min_size=0,
             max_size=8,
         )
@@ -567,10 +564,7 @@ class TestPropertyCapabilitySetIndex:
     )
     def test_all_tokens_findable_by_tool_name(self, n_tokens):
         """Every token in the set is findable via its tool definition name."""
-        tokens = [
-            ShellToken(f"cmd-{i}", allowed=["echo"])
-            for i in range(n_tokens)
-        ]
+        tokens = [ShellToken(f"cmd-{i}", allowed=["echo"]) for i in range(n_tokens)]
         cap_set = CapabilitySet(tokens=tokens)
 
         for token in tokens:
@@ -590,10 +584,7 @@ class TestPropertyCapabilitySetIndex:
     )
     def test_add_token_immediately_findable(self, initial, added):
         """Tokens added at runtime are immediately findable."""
-        tokens = [
-            ShellToken(f"init-{i}", allowed=["echo"])
-            for i in range(initial)
-        ]
+        tokens = [ShellToken(f"init-{i}", allowed=["echo"]) for i in range(initial)]
         cap_set = CapabilitySet(tokens=tokens)
 
         added_tokens = []
