@@ -6,7 +6,17 @@ import time
 import warnings
 from datetime import datetime, timezone
 
-from .actions import shell_exec, http_request
+import asyncio
+from dataclasses import dataclass
+
+from .actions import (
+    db_query,
+    file_read,
+    file_write,
+    http_request,
+    shell_exec,
+    shell_exec_with_env,
+)
 from .audit import Proof
 
 
@@ -351,5 +361,440 @@ class MultiUseShellToken(MultiUseToken):
                     }
                 },
                 "required": ["command"],
+            },
+        }
+
+
+# ---------------------------------------------------------------------------
+# FileToken
+# ---------------------------------------------------------------------------
+
+_FILE_MODES = {"read", "write", "readwrite"}
+
+
+class FileToken(LinearToken):
+    """Scoped filesystem access token (single use)."""
+
+    def __init__(
+        self,
+        name: str,
+        allowed_paths: list[str],
+        mode: str = "read",
+        requires_approval: bool = False,
+    ) -> None:
+        if mode not in _FILE_MODES:
+            raise ValueError(f"mode must be one of {_FILE_MODES}, got {mode!r}")
+        scope = f"file:{mode}:{','.join(allowed_paths)}"
+        super().__init__(name, scope, requires_approval)
+        self.allowed_paths = allowed_paths
+        self.mode = mode
+
+    def _allowed_operations(self) -> list[str]:
+        if self.mode == "readwrite":
+            return ["read", "write"]
+        return [self.mode]
+
+    async def consume(
+        self, operation: str, path: str, content: str | None = None
+    ) -> Proof:
+        self._check_reuse()
+        allowed_ops = self._allowed_operations()
+        if operation not in allowed_ops:
+            raise TokenScopeError(
+                f"Operation {operation!r} not allowed by mode {self.mode!r}. "
+                f"Allowed: {allowed_ops}"
+            )
+        t0 = time.monotonic()
+        if operation == "read":
+            result = await file_read(path, self.allowed_paths)
+        else:
+            if content is None:
+                raise ValueError("content is required for write operations")
+            result = await file_write(path, content, self.allowed_paths)
+        duration = (time.monotonic() - t0) * 1000
+        summary = result[:200] if result else "(empty)"
+        return self._mark_consumed(
+            {"operation": operation, "path": path}, summary, duration
+        )
+
+    def to_tool_definition(self) -> dict:
+        approval_note = " REQUIRES APPROVAL." if self.requires_approval else ""
+        ops = self._allowed_operations()
+        props: dict = {
+            "operation": {
+                "type": "string",
+                "enum": ops,
+                "description": "File operation to perform",
+            },
+            "path": {
+                "type": "string",
+                "description": "Absolute path to the file",
+            },
+        }
+        if "write" in ops:
+            props["content"] = {
+                "type": "string",
+                "description": "Content to write (required for write operations)",
+            }
+        return {
+            "name": f"file_{self.name}",
+            "description": (
+                f"File access ({self.mode}) within {self.allowed_paths}. "
+                f"ONE USE ONLY.{approval_note}"
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": props,
+                "required": ["operation", "path"],
+            },
+        }
+
+
+class MultiUseFileToken(MultiUseToken):
+    """Scoped filesystem access token with N uses."""
+
+    def __init__(
+        self,
+        name: str,
+        allowed_paths: list[str],
+        mode: str = "read",
+        max_uses: int = 5,
+        requires_approval: bool = False,
+    ) -> None:
+        if mode not in _FILE_MODES:
+            raise ValueError(f"mode must be one of {_FILE_MODES}, got {mode!r}")
+        scope = f"file:{mode}:{','.join(allowed_paths)}"
+        super().__init__(name, scope, max_uses, requires_approval)
+        self.allowed_paths = allowed_paths
+        self.mode = mode
+
+    def _allowed_operations(self) -> list[str]:
+        if self.mode == "readwrite":
+            return ["read", "write"]
+        return [self.mode]
+
+    async def consume(
+        self, operation: str, path: str, content: str | None = None
+    ) -> Proof:
+        self._check_reuse()
+        allowed_ops = self._allowed_operations()
+        if operation not in allowed_ops:
+            raise TokenScopeError(
+                f"Operation {operation!r} not allowed by mode {self.mode!r}. "
+                f"Allowed: {allowed_ops}"
+            )
+        t0 = time.monotonic()
+        if operation == "read":
+            result = await file_read(path, self.allowed_paths)
+        else:
+            if content is None:
+                raise ValueError("content is required for write operations")
+            result = await file_write(path, content, self.allowed_paths)
+        duration = (time.monotonic() - t0) * 1000
+        summary = result[:200] if result else "(empty)"
+        return self._record_use(
+            {"operation": operation, "path": path}, summary, duration
+        )
+
+    def to_tool_definition(self) -> dict:
+        approval_note = " REQUIRES APPROVAL." if self.requires_approval else ""
+        ops = self._allowed_operations()
+        props: dict = {
+            "operation": {
+                "type": "string",
+                "enum": ops,
+                "description": "File operation to perform",
+            },
+            "path": {
+                "type": "string",
+                "description": "Absolute path to the file",
+            },
+        }
+        if "write" in ops:
+            props["content"] = {
+                "type": "string",
+                "description": "Content to write (required for write operations)",
+            }
+        return {
+            "name": f"file_{self.name}",
+            "description": (
+                f"File access ({self.mode}) within {self.allowed_paths}. "
+                f"{self.uses_remaining} uses remaining.{approval_note}"
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": props,
+                "required": ["operation", "path"],
+            },
+        }
+
+
+# ---------------------------------------------------------------------------
+# SecretToken (wrapper pattern)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class SecretInjection:
+    """Describes how a secret is injected into an action."""
+
+    kind: str  # "header" or "env"
+    key: str   # header name or env var name
+
+
+class SecretToken(LinearToken):
+    """Injects a credential into a single action without exposing it to the LLM.
+
+    Wraps an inner token (HttpToken or ShellToken). The LLM sees the same
+    tool interface as the inner token, but the secret is injected
+    transparently at execution time.
+    """
+
+    def __init__(
+        self,
+        name: str,
+        secret_value: str,
+        injection: SecretInjection,
+        inner_token: LinearToken,
+        requires_approval: bool = False,
+    ) -> None:
+        scope = f"secret:{injection.kind}:{injection.key}:{inner_token.scope}"
+        super().__init__(name, scope, requires_approval)
+        self._secret_value = secret_value
+        self.injection = injection
+        self.inner_token = inner_token
+
+    async def consume(self, **kwargs) -> Proof:
+        self._check_reuse()
+        t0 = time.monotonic()
+
+        if self.injection.kind == "header":
+            # Inner token is an HttpToken — call http_request directly with
+            # the secret injected as a header.
+            inner = self.inner_token
+            if not isinstance(inner, HttpToken):
+                raise TokenScopeError(
+                    "header injection requires an HttpToken as inner_token"
+                )
+            method = kwargs.get("method") or inner.methods[0]
+            body = kwargs.get("body")
+            headers = {self.injection.key: self._secret_value}
+            result = await http_request(
+                inner.url, method, inner.methods, body=body, headers=headers,
+            )
+            result_summary = f"HTTP {result['status']}: {result['body'][:150]}"
+
+        elif self.injection.kind == "env":
+            # Inner token is a ShellToken — call shell_exec_with_env with
+            # the secret as an environment variable.
+            inner = self.inner_token
+            if not isinstance(inner, ShellToken):
+                raise TokenScopeError(
+                    "env injection requires a ShellToken as inner_token"
+                )
+            command = kwargs["command"]
+            env_vars = {self.injection.key: self._secret_value}
+            result_str = await shell_exec_with_env(
+                command, inner.allowed, env_vars,
+            )
+            result_summary = result_str[:200] if result_str else "(empty)"
+
+        else:
+            raise TokenScopeError(
+                f"Unknown injection kind: {self.injection.kind!r}"
+            )
+
+        duration = (time.monotonic() - t0) * 1000
+        # Redact: never include secret in proof args
+        redacted_args = {k: v for k, v in kwargs.items()}
+        return self._mark_consumed(
+            redacted_args,
+            f"[secret injected as {self.injection.kind}:{self.injection.key}] "
+            + result_summary,
+            duration,
+        )
+
+    def to_tool_definition(self) -> dict:
+        """Mirror the inner token's tool schema under a different name."""
+        inner_def = self.inner_token.to_tool_definition()
+        approval_note = " REQUIRES APPROVAL." if self.requires_approval else ""
+        return {
+            "name": f"secret_{self.name}",
+            "description": (
+                f"Execute with injected credential "
+                f"({self.injection.kind}:{self.injection.key}). "
+                f"ONE USE ONLY.{approval_note}"
+            ),
+            "input_schema": inner_def["input_schema"],
+        }
+
+
+# ---------------------------------------------------------------------------
+# DatabaseToken
+# ---------------------------------------------------------------------------
+
+
+class DatabaseToken(LinearToken):
+    """Parameterised database query token (single use)."""
+
+    def __init__(
+        self,
+        name: str,
+        dsn: str,
+        allowed_patterns: list[str],
+        requires_approval: bool = False,
+    ) -> None:
+        scope = f"db:{','.join(allowed_patterns)}"
+        super().__init__(name, scope, requires_approval)
+        self._dsn = dsn
+        self.allowed_patterns = allowed_patterns
+
+    async def consume(self, query: str, params: list | None = None) -> Proof:
+        self._check_reuse()
+        t0 = time.monotonic()
+        rows = await db_query(self._dsn, query, params, self.allowed_patterns)
+        duration = (time.monotonic() - t0) * 1000
+        summary = str(rows)[:200]
+        return self._mark_consumed(
+            {"query": query, "params": params}, summary, duration
+        )
+
+    def to_tool_definition(self) -> dict:
+        approval_note = " REQUIRES APPROVAL." if self.requires_approval else ""
+        return {
+            "name": f"db_{self.name}",
+            "description": (
+                f"Execute a parameterised SQL query. "
+                f"Allowed patterns: {self.allowed_patterns}. "
+                f"ONE USE ONLY.{approval_note}"
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "SQL query with $1, $2, ... placeholders",
+                    },
+                    "params": {
+                        "type": "array",
+                        "items": {},
+                        "description": "Positional parameter values",
+                    },
+                },
+                "required": ["query"],
+            },
+        }
+
+
+class MultiUseDatabaseToken(MultiUseToken):
+    """Parameterised database query token with N uses."""
+
+    def __init__(
+        self,
+        name: str,
+        dsn: str,
+        allowed_patterns: list[str],
+        max_uses: int = 5,
+        requires_approval: bool = False,
+    ) -> None:
+        scope = f"db:{','.join(allowed_patterns)}"
+        super().__init__(name, scope, max_uses, requires_approval)
+        self._dsn = dsn
+        self.allowed_patterns = allowed_patterns
+
+    async def consume(self, query: str, params: list | None = None) -> Proof:
+        self._check_reuse()
+        t0 = time.monotonic()
+        rows = await db_query(self._dsn, query, params, self.allowed_patterns)
+        duration = (time.monotonic() - t0) * 1000
+        summary = str(rows)[:200]
+        return self._record_use(
+            {"query": query, "params": params}, summary, duration
+        )
+
+    def to_tool_definition(self) -> dict:
+        approval_note = " REQUIRES APPROVAL." if self.requires_approval else ""
+        return {
+            "name": f"db_{self.name}",
+            "description": (
+                f"Execute a parameterised SQL query. "
+                f"Allowed patterns: {self.allowed_patterns}. "
+                f"{self.uses_remaining} uses remaining.{approval_note}"
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "SQL query with $1, $2, ... placeholders",
+                    },
+                    "params": {
+                        "type": "array",
+                        "items": {},
+                        "description": "Positional parameter values",
+                    },
+                },
+                "required": ["query"],
+            },
+        }
+
+
+# ---------------------------------------------------------------------------
+# WaitToken
+# ---------------------------------------------------------------------------
+
+
+class WaitToken(LinearToken):
+    """Controlled delay token — asyncio.sleep with a max-seconds cap."""
+
+    def __init__(
+        self,
+        name: str,
+        max_seconds: int = 300,
+        requires_approval: bool = False,
+    ) -> None:
+        scope = f"wait:{max_seconds}s"
+        super().__init__(name, scope, requires_approval)
+        self.max_seconds = max_seconds
+
+    async def consume(self, seconds: int, reason: str = "") -> Proof:
+        self._check_reuse()
+        if seconds > self.max_seconds:
+            raise ValueError(
+                f"Requested {seconds}s exceeds maximum of {self.max_seconds}s"
+            )
+        if seconds < 0:
+            raise ValueError("seconds must be non-negative")
+        t0 = time.monotonic()
+        await asyncio.sleep(seconds)
+        duration = (time.monotonic() - t0) * 1000
+        summary = f"Waited {seconds}s"
+        if reason:
+            summary += f" ({reason})"
+        return self._mark_consumed(
+            {"seconds": seconds, "reason": reason}, summary, duration
+        )
+
+    def to_tool_definition(self) -> dict:
+        approval_note = " REQUIRES APPROVAL." if self.requires_approval else ""
+        return {
+            "name": f"wait_{self.name}",
+            "description": (
+                f"Wait/sleep for a specified duration (max {self.max_seconds}s). "
+                f"ONE USE ONLY.{approval_note}"
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "seconds": {
+                        "type": "integer",
+                        "description": "Number of seconds to wait",
+                    },
+                    "reason": {
+                        "type": "string",
+                        "description": "Why the wait is needed",
+                    },
+                },
+                "required": ["seconds"],
             },
         }

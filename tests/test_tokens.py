@@ -2,18 +2,27 @@
 
 import asyncio
 import warnings
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from linear_agentics.tokens import (
+    DatabaseToken,
     DeployToken,
+    FileToken,
     HttpToken,
     LinearToken,
+    MultiUseDatabaseToken,
+    MultiUseFileToken,
     MultiUseShellToken,
+    SecretInjection,
+    SecretToken,
     ShellToken,
     TokenReusedError,
+    TokenScopeError,
+    WaitToken,
 )
-from linear_agentics.actions import CommandNotAllowedError
+from linear_agentics.actions import CommandNotAllowedError, FileAccessError
 
 
 class TestShellToken:
@@ -136,3 +145,307 @@ class TestMultiUseShellToken:
     def test_to_tool_definition(self, multi_echo):
         tool_def = multi_echo.to_tool_definition()
         assert "3 uses remaining" in tool_def["description"]
+
+
+class TestFileToken:
+    @pytest.fixture
+    def read_token(self, tmp_path):
+        return FileToken("cfg", allowed_paths=[str(tmp_path)], mode="read")
+
+    @pytest.fixture
+    def write_token(self, tmp_path):
+        return FileToken("out", allowed_paths=[str(tmp_path)], mode="write")
+
+    @pytest.fixture
+    def rw_token(self, tmp_path):
+        return FileToken("rw", allowed_paths=[str(tmp_path)], mode="readwrite")
+
+    async def test_read_allowed_path(self, tmp_path, read_token):
+        f = tmp_path / "config.yaml"
+        f.write_text("key: value")
+        proof = await read_token.consume(operation="read", path=str(f))
+        assert "key: value" in proof.result_summary
+        assert proof.token_name == "cfg"
+
+    async def test_write_allowed_path(self, tmp_path, write_token):
+        f = tmp_path / "artifact.txt"
+        proof = await write_token.consume(
+            operation="write", path=str(f), content="hello"
+        )
+        assert f.read_text() == "hello"
+        assert "bytes" in proof.result_summary
+
+    async def test_path_traversal_rejected(self, tmp_path, read_token):
+        evil = str(tmp_path / ".." / ".." / "etc" / "passwd")
+        with pytest.raises(FileAccessError):
+            await read_token.consume(operation="read", path=evil)
+
+    async def test_mode_enforcement_read_only(self, tmp_path, read_token):
+        with pytest.raises(TokenScopeError, match="not allowed"):
+            await read_token.consume(
+                operation="write", path=str(tmp_path / "x"), content="bad"
+            )
+
+    async def test_mode_enforcement_write_only(self, tmp_path, write_token):
+        with pytest.raises(TokenScopeError, match="not allowed"):
+            await write_token.consume(operation="read", path=str(tmp_path / "x"))
+
+    async def test_readwrite_allows_both(self, tmp_path, rw_token):
+        f = tmp_path / "data.txt"
+        f.write_text("original")
+        proof = await rw_token.consume(operation="read", path=str(f))
+        assert "original" in proof.result_summary
+
+    async def test_reuse_raises(self, tmp_path, read_token):
+        f = tmp_path / "test.txt"
+        f.write_text("test")
+        await read_token.consume(operation="read", path=str(f))
+        with pytest.raises(TokenReusedError):
+            await read_token.consume(operation="read", path=str(f))
+
+    def test_to_tool_definition(self, read_token):
+        tool_def = read_token.to_tool_definition()
+        assert tool_def["name"] == "file_cfg"
+        assert "ONE USE ONLY" in tool_def["description"]
+        assert tool_def["input_schema"]["properties"]["operation"]["enum"] == ["read"]
+
+    def test_to_tool_definition_readwrite_has_content(self, rw_token):
+        tool_def = rw_token.to_tool_definition()
+        assert "content" in tool_def["input_schema"]["properties"]
+        assert tool_def["input_schema"]["properties"]["operation"]["enum"] == [
+            "read",
+            "write",
+        ]
+
+
+class TestMultiUseFileToken:
+    async def test_multiple_reads(self, tmp_path):
+        f = tmp_path / "data.txt"
+        f.write_text("content")
+        token = MultiUseFileToken(
+            "reader", allowed_paths=[str(tmp_path)], mode="read", max_uses=3
+        )
+        await token.consume(operation="read", path=str(f))
+        assert token.uses_remaining == 2
+        await token.consume(operation="read", path=str(f))
+        assert token.uses_remaining == 1
+        await token.consume(operation="read", path=str(f))
+        assert token.consumed
+
+    async def test_exhausted_raises(self, tmp_path):
+        f = tmp_path / "data.txt"
+        f.write_text("content")
+        token = MultiUseFileToken(
+            "reader", allowed_paths=[str(tmp_path)], mode="read", max_uses=1
+        )
+        await token.consume(operation="read", path=str(f))
+        with pytest.raises(TokenReusedError, match="exhausted"):
+            await token.consume(operation="read", path=str(f))
+
+
+class TestSecretToken:
+    async def test_header_injection(self):
+        inner = HttpToken("api", url="https://api.example.com", methods=["POST"])
+        token = SecretToken(
+            "authed-api",
+            secret_value="Bearer sk-secret-123",
+            injection=SecretInjection(kind="header", key="Authorization"),
+            inner_token=inner,
+        )
+        mock_result = {"status": 200, "body": "ok"}
+        with patch("linear_agentics.tokens.http_request", new_callable=AsyncMock) as mock_req:
+            mock_req.return_value = mock_result
+            proof = await token.consume(method="POST", body={"action": "deploy"})
+
+            # Verify the header was injected
+            mock_req.assert_called_once_with(
+                "https://api.example.com",
+                "POST",
+                ["POST"],
+                body={"action": "deploy"},
+                headers={"Authorization": "Bearer sk-secret-123"},
+            )
+
+        # Verify secret is NOT in proof
+        assert "sk-secret-123" not in str(proof.args)
+        assert "sk-secret-123" not in proof.result_summary
+        assert "[secret injected" in proof.result_summary
+
+    async def test_env_injection(self):
+        inner = ShellToken("migrate", allowed=["python manage.py"])
+        token = SecretToken(
+            "authed-migrate",
+            secret_value="postgres://secret@host/db",
+            injection=SecretInjection(kind="env", key="DATABASE_URL"),
+            inner_token=inner,
+        )
+        with patch("linear_agentics.tokens.shell_exec_with_env", new_callable=AsyncMock) as mock_exec:
+            mock_exec.return_value = "Migrations applied"
+            proof = await token.consume(command="python manage.py migrate")
+
+            mock_exec.assert_called_once_with(
+                "python manage.py migrate",
+                ["python manage.py"],
+                {"DATABASE_URL": "postgres://secret@host/db"},
+            )
+
+        assert "postgres://secret@host/db" not in str(proof.args)
+        assert "postgres://secret@host/db" not in proof.result_summary
+        assert "[secret injected" in proof.result_summary
+
+    async def test_reuse_raises(self):
+        inner = HttpToken("api", url="https://example.com", methods=["GET"])
+        token = SecretToken(
+            "test",
+            secret_value="secret",
+            injection=SecretInjection(kind="header", key="X-Key"),
+            inner_token=inner,
+        )
+        token._consumed = True
+        with pytest.raises(TokenReusedError):
+            await token.consume(method="GET")
+
+    def test_to_tool_definition_mirrors_inner(self):
+        inner = HttpToken("api", url="https://example.com", methods=["GET"])
+        token = SecretToken(
+            "authed",
+            secret_value="secret",
+            injection=SecretInjection(kind="header", key="Authorization"),
+            inner_token=inner,
+        )
+        tool_def = token.to_tool_definition()
+        inner_def = inner.to_tool_definition()
+        assert tool_def["name"] == "secret_authed"
+        assert tool_def["input_schema"] == inner_def["input_schema"]
+        assert "ONE USE ONLY" in tool_def["description"]
+        token._consumed = True
+        inner._consumed = True
+
+    def test_secret_not_in_tool_definition(self):
+        inner = ShellToken("cmd", allowed=["echo"])
+        token = SecretToken(
+            "s",
+            secret_value="super-secret-value",
+            injection=SecretInjection(kind="env", key="KEY"),
+            inner_token=inner,
+        )
+        tool_def = token.to_tool_definition()
+        assert "super-secret-value" not in str(tool_def)
+        token._consumed = True
+        inner._consumed = True
+
+
+class TestDatabaseToken:
+    async def test_allowed_query(self):
+        token = DatabaseToken(
+            "users-db",
+            dsn="postgres://localhost/test",
+            allowed_patterns=["SELECT"],
+        )
+        mock_rows = [{"id": 1, "name": "alice"}]
+        with patch("linear_agentics.tokens.db_query", new_callable=AsyncMock) as mock_db:
+            mock_db.return_value = mock_rows
+            proof = await token.consume(
+                query="SELECT * FROM users WHERE id = $1", params=[1]
+            )
+            mock_db.assert_called_once_with(
+                "postgres://localhost/test",
+                "SELECT * FROM users WHERE id = $1",
+                [1],
+                ["SELECT"],
+            )
+        assert proof.token_name == "users-db"
+        assert "alice" in proof.result_summary
+
+    async def test_reuse_raises(self):
+        token = DatabaseToken("db", dsn="postgres://x", allowed_patterns=["SELECT"])
+        token._consumed = True
+        with pytest.raises(TokenReusedError):
+            await token.consume(query="SELECT 1")
+
+    def test_to_tool_definition(self):
+        token = DatabaseToken(
+            "db", dsn="postgres://x", allowed_patterns=["SELECT", "INSERT"]
+        )
+        tool_def = token.to_tool_definition()
+        assert tool_def["name"] == "db_db"
+        assert "ONE USE ONLY" in tool_def["description"]
+        assert "query" in tool_def["input_schema"]["properties"]
+        assert "params" in tool_def["input_schema"]["properties"]
+        # DSN must not appear in tool definition
+        assert "postgres://x" not in str(tool_def)
+        token._consumed = True
+
+    def test_dsn_not_in_tool_definition(self):
+        token = DatabaseToken(
+            "db", dsn="postgres://user:pass@host/db", allowed_patterns=["SELECT"]
+        )
+        tool_def = token.to_tool_definition()
+        assert "postgres://" not in str(tool_def)
+        token._consumed = True
+
+
+class TestMultiUseDatabaseToken:
+    async def test_multiple_queries(self):
+        token = MultiUseDatabaseToken(
+            "reader",
+            dsn="postgres://localhost/test",
+            allowed_patterns=["SELECT"],
+            max_uses=3,
+        )
+        with patch("linear_agentics.tokens.db_query", new_callable=AsyncMock) as mock_db:
+            mock_db.return_value = [{"count": 42}]
+            await token.consume(query="SELECT count(*) FROM users")
+            assert token.uses_remaining == 2
+            await token.consume(query="SELECT count(*) FROM orders")
+            assert token.uses_remaining == 1
+            await token.consume(query="SELECT count(*) FROM items")
+            assert token.consumed
+
+    async def test_exhausted_raises(self):
+        token = MultiUseDatabaseToken(
+            "reader",
+            dsn="postgres://localhost/test",
+            allowed_patterns=["SELECT"],
+            max_uses=1,
+        )
+        with patch("linear_agentics.tokens.db_query", new_callable=AsyncMock) as mock_db:
+            mock_db.return_value = []
+            await token.consume(query="SELECT 1")
+            with pytest.raises(TokenReusedError, match="exhausted"):
+                await token.consume(query="SELECT 2")
+
+
+class TestWaitToken:
+    @pytest.fixture
+    def wait_token(self):
+        return WaitToken("pause", max_seconds=60)
+
+    async def test_consume_sleeps(self, wait_token):
+        with patch("linear_agentics.tokens.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            proof = await wait_token.consume(seconds=5, reason="waiting for deploy")
+            mock_sleep.assert_called_once_with(5)
+        assert "Waited 5s" in proof.result_summary
+        assert "waiting for deploy" in proof.result_summary
+        assert proof.args == {"seconds": 5, "reason": "waiting for deploy"}
+
+    async def test_max_seconds_exceeded(self, wait_token):
+        with pytest.raises(ValueError, match="exceeds maximum"):
+            await wait_token.consume(seconds=120)
+
+    async def test_negative_seconds_rejected(self, wait_token):
+        with pytest.raises(ValueError, match="non-negative"):
+            await wait_token.consume(seconds=-1)
+
+    async def test_reuse_raises(self, wait_token):
+        with patch("linear_agentics.tokens.asyncio.sleep", new_callable=AsyncMock):
+            await wait_token.consume(seconds=1)
+        with pytest.raises(TokenReusedError):
+            await wait_token.consume(seconds=1)
+
+    def test_to_tool_definition(self, wait_token):
+        tool_def = wait_token.to_tool_definition()
+        assert tool_def["name"] == "wait_pause"
+        assert "ONE USE ONLY" in tool_def["description"]
+        assert "max 60s" in tool_def["description"]
+        assert "seconds" in tool_def["input_schema"]["properties"]
