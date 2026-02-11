@@ -63,12 +63,18 @@ class TestShellToken:
         tool_def = echo_token.to_tool_definition()
         assert tool_def["name"] == "shell_echo-test"
         assert "ONE USE ONLY" in tool_def["description"]
-        assert "command" in tool_def["input_schema"]["properties"]
+        assert "echo" in tool_def["description"]
+        schema = tool_def["input_schema"]
+        assert schema["type"] == "object"
+        assert "command" in schema["properties"]
+        assert schema["properties"]["command"]["type"] == "string"
+        assert schema["required"] == ["command"]
 
     def test_to_tool_definition_with_approval(self):
         token = ShellToken("sensitive", allowed=["ls"], requires_approval=True)
         tool_def = token.to_tool_definition()
         assert "REQUIRES APPROVAL" in tool_def["description"]
+        assert "ONE USE ONLY" in tool_def["description"]
         # prevent __del__ warning
         token._consumed = True
 
@@ -81,11 +87,61 @@ class TestShellToken:
 
 
 class TestHttpToken:
+    async def test_consume_with_mock(self):
+        token = HttpToken("health", url="https://example.com/health", methods=["GET"])
+        mock_result = {"status": 200, "body": "ok"}
+        with patch("linear_agentics.tokens.http_request", new_callable=AsyncMock) as mock_req:
+            mock_req.return_value = mock_result
+            proof = await token.consume(method="GET")
+            mock_req.assert_called_once_with(
+                "https://example.com/health", "GET", ["GET"], body=None
+            )
+        assert proof.token_name == "health"
+        assert proof.args == {"method": "GET", "url": "https://example.com/health", "body": None}
+        assert "HTTP 200" in proof.result_summary
+        assert token.consumed
+
+    async def test_consume_default_method(self):
+        token = HttpToken("api", url="https://example.com/api", methods=["POST", "GET"])
+        mock_result = {"status": 201, "body": "created"}
+        with patch("linear_agentics.tokens.http_request", new_callable=AsyncMock) as mock_req:
+            mock_req.return_value = mock_result
+            proof = await token.consume()
+            # Default method should be the first in the list
+            mock_req.assert_called_once_with(
+                "https://example.com/api", "POST", ["POST", "GET"], body=None
+            )
+        assert proof.args["method"] == "POST"
+
+    async def test_consume_with_body(self):
+        token = HttpToken("api", url="https://example.com/api", methods=["POST"])
+        mock_result = {"status": 200, "body": "ok"}
+        with patch("linear_agentics.tokens.http_request", new_callable=AsyncMock) as mock_req:
+            mock_req.return_value = mock_result
+            proof = await token.consume(method="POST", body={"key": "value"})
+            mock_req.assert_called_once_with(
+                "https://example.com/api", "POST", ["POST"], body={"key": "value"}
+            )
+        assert proof.args["body"] == {"key": "value"}
+
     async def test_to_tool_definition(self):
         token = HttpToken("health", url="https://example.com/health", methods=["GET"])
         tool_def = token.to_tool_definition()
         assert tool_def["name"] == "health"
         assert "GET" in tool_def["description"]
+        assert "ONE USE ONLY" in tool_def["description"]
+        assert "https://example.com/health" in tool_def["description"]
+        schema = tool_def["input_schema"]
+        assert schema["type"] == "object"
+        assert "method" in schema["properties"]
+        assert schema["properties"]["method"]["enum"] == ["GET"]
+        assert "body" in schema["properties"]
+        token._consumed = True
+
+    async def test_to_tool_definition_with_approval(self):
+        token = HttpToken("api", url="https://example.com", methods=["POST"], requires_approval=True)
+        tool_def = token.to_tool_definition()
+        assert "REQUIRES APPROVAL" in tool_def["description"]
         token._consumed = True
 
     async def test_reuse_raises(self):
@@ -98,6 +154,45 @@ class TestHttpToken:
 
 
 class TestDeployToken:
+    def test_init_stores_attributes(self):
+        token = DeployToken(
+            "staging",
+            method="kubectl",
+            target="staging",
+            image="app:v1",
+            rollback_to="app:v0",
+            requires_approval=True,
+        )
+        assert token.method == "kubectl"
+        assert token.target == "staging"
+        assert token.image == "app:v1"
+        assert token.rollback_to == "app:v0"
+        assert token.requires_approval is True
+        assert "kubectl set image" in token._deploy_command
+        assert token._rollback_command is not None
+        token._consumed = True
+
+    def test_init_no_rollback(self):
+        token = DeployToken("prod", method="kubectl", target="prod", image="app:v2")
+        assert token.rollback_to is None
+        assert token._rollback_command is None
+        token._consumed = True
+
+    async def test_consume_with_mock(self):
+        token = DeployToken("staging", method="kubectl", target="staging", image="app:v1")
+        with patch("linear_agentics.tokens.shell_exec", new_callable=AsyncMock) as mock_exec:
+            mock_exec.return_value = "deployment.apps/app image updated"
+            proof = await token.consume()
+            mock_exec.assert_called_once()
+            call_args = mock_exec.call_args
+            assert "kubectl set image" in call_args[0][0]
+            assert "app:v1" in call_args[0][0]
+            assert "--namespace=staging" in call_args[0][0]
+        assert proof.token_name == "staging"
+        assert proof.args == {"method": "kubectl", "target": "staging", "image": "app:v1"}
+        assert "Deployed app:v1 to staging" in proof.result_summary
+        assert token.consumed
+
     def test_to_tool_definition(self):
         token = DeployToken(
             "staging",
@@ -109,7 +204,13 @@ class TestDeployToken:
         tool_def = token.to_tool_definition()
         assert tool_def["name"] == "deploy_staging"
         assert "REQUIRES APPROVAL" in tool_def["description"]
+        assert "ONE USE ONLY" in tool_def["description"]
         assert "app:v1" in tool_def["description"]
+        assert "staging" in tool_def["description"]
+        assert "kubectl" in tool_def["description"]
+        schema = tool_def["input_schema"]
+        assert schema["type"] == "object"
+        assert schema["required"] == []
         token._consumed = True
 
     async def test_reuse_raises(self):
@@ -144,7 +245,14 @@ class TestMultiUseShellToken:
 
     def test_to_tool_definition(self, multi_echo):
         tool_def = multi_echo.to_tool_definition()
+        assert tool_def["name"] == "shell_multi-echo"
         assert "3 uses remaining" in tool_def["description"]
+        assert "echo" in tool_def["description"]
+        schema = tool_def["input_schema"]
+        assert schema["type"] == "object"
+        assert "command" in schema["properties"]
+        assert schema["properties"]["command"]["type"] == "string"
+        assert schema["required"] == ["command"]
 
 
 class TestFileToken:
@@ -207,15 +315,33 @@ class TestFileToken:
         tool_def = read_token.to_tool_definition()
         assert tool_def["name"] == "file_cfg"
         assert "ONE USE ONLY" in tool_def["description"]
-        assert tool_def["input_schema"]["properties"]["operation"]["enum"] == ["read"]
+        assert "read" in tool_def["description"]
+        schema = tool_def["input_schema"]
+        assert schema["type"] == "object"
+        assert schema["properties"]["operation"]["enum"] == ["read"]
+        assert schema["properties"]["operation"]["type"] == "string"
+        assert "path" in schema["properties"]
+        assert schema["properties"]["path"]["type"] == "string"
+        assert schema["required"] == ["operation", "path"]
+        # read-only should NOT have content property
+        assert "content" not in schema["properties"]
 
     def test_to_tool_definition_readwrite_has_content(self, rw_token):
         tool_def = rw_token.to_tool_definition()
-        assert "content" in tool_def["input_schema"]["properties"]
-        assert tool_def["input_schema"]["properties"]["operation"]["enum"] == [
+        schema = tool_def["input_schema"]
+        assert "content" in schema["properties"]
+        assert schema["properties"]["content"]["type"] == "string"
+        assert schema["properties"]["operation"]["enum"] == [
             "read",
             "write",
         ]
+        assert schema["required"] == ["operation", "path"]
+
+    def test_to_tool_definition_write_only(self, write_token):
+        tool_def = write_token.to_tool_definition()
+        schema = tool_def["input_schema"]
+        assert schema["properties"]["operation"]["enum"] == ["write"]
+        assert "content" in schema["properties"]
 
 
 class TestMultiUseFileToken:
@@ -318,6 +444,8 @@ class TestSecretToken:
         assert tool_def["name"] == "secret_authed"
         assert tool_def["input_schema"] == inner_def["input_schema"]
         assert "ONE USE ONLY" in tool_def["description"]
+        assert "header" in tool_def["description"]
+        assert "Authorization" in tool_def["description"]
         token._consumed = True
         inner._consumed = True
 
@@ -370,8 +498,14 @@ class TestDatabaseToken:
         tool_def = token.to_tool_definition()
         assert tool_def["name"] == "db_db"
         assert "ONE USE ONLY" in tool_def["description"]
-        assert "query" in tool_def["input_schema"]["properties"]
-        assert "params" in tool_def["input_schema"]["properties"]
+        assert "SELECT" in tool_def["description"]
+        assert "INSERT" in tool_def["description"]
+        schema = tool_def["input_schema"]
+        assert schema["type"] == "object"
+        assert "query" in schema["properties"]
+        assert schema["properties"]["query"]["type"] == "string"
+        assert "params" in schema["properties"]
+        assert schema["required"] == ["query"]
         # DSN must not appear in tool definition
         assert "postgres://x" not in str(tool_def)
         token._consumed = True
@@ -448,4 +582,9 @@ class TestWaitToken:
         assert tool_def["name"] == "wait_pause"
         assert "ONE USE ONLY" in tool_def["description"]
         assert "max 60s" in tool_def["description"]
-        assert "seconds" in tool_def["input_schema"]["properties"]
+        schema = tool_def["input_schema"]
+        assert schema["type"] == "object"
+        assert "seconds" in schema["properties"]
+        assert schema["properties"]["seconds"]["type"] == "integer"
+        assert "reason" in schema["properties"]
+        assert schema["required"] == ["seconds"]

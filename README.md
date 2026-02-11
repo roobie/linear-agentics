@@ -42,7 +42,7 @@ LLM reasons, calls tools
 Token layer validates scope, enforces one-time use, records proof
   |
   v
-Action layer executes (subprocess, HTTP, kubectl)
+Action layer executes (subprocess, HTTP, kubectl, SQL, file I/O)
   |
   v
 Approval gate blocks if token requires human sign-off
@@ -58,18 +58,90 @@ Audit trail captures everything as structured JSON
 
 ### Tokens (`linear_agentics.tokens`)
 
-Tokens are the core primitive. Each token is a scoped, auditable permit for a single action.
+Tokens are the core primitive. Each token is a scoped, auditable permit for a single action (or N actions for multi-use tokens).
+
+#### Shell tokens
 
 | Token | Purpose | Example |
 |-------|---------|---------|
 | `ShellToken` | Run a shell command matching allowed prefixes | `ShellToken("logs", allowed=["kubectl logs"])` |
-| `HttpToken` | Make an HTTP request to a specific URL | `HttpToken("health", url="https://...", methods=["GET"])` |
-| `DeployToken` | Execute a one-time deployment | `DeployToken("prod", method="kubectl", target="production", image="app:v2")` |
 | `MultiUseShellToken` | Shell token with N uses instead of 1 | `MultiUseShellToken("read", allowed=["kubectl get"], max_uses=5)` |
+
+Shell commands are parsed with `shlex.split` and executed via `subprocess_exec` (never `shell=True`). Shell operators (`||`, `&&`, `;`, `|`, `&`) are rejected regardless of quoting.
+
+#### HTTP tokens
+
+| Token | Purpose | Example |
+|-------|---------|---------|
+| `HttpToken` | Make an HTTP request to a specific URL | `HttpToken("health", url="https://...", methods=["GET"])` |
+
+Scoped to a single URL and a set of allowed HTTP methods.
+
+#### File tokens
+
+| Token | Purpose | Example |
+|-------|---------|---------|
+| `FileToken` | Read or write files within allowed paths | `FileToken("cfg", allowed_paths=["/etc/app"], mode="read")` |
+| `MultiUseFileToken` | File access with N uses | `MultiUseFileToken("logs", allowed_paths=["/var/log"], mode="read", max_uses=10)` |
+
+Modes: `"read"`, `"write"`, or `"readwrite"`. Path traversal attacks (`../`, symlink escapes) are blocked — all paths are resolved via `os.path.realpath()` and checked against the allowed list.
+
+#### Database tokens
+
+| Token | Purpose | Example |
+|-------|---------|---------|
+| `DatabaseToken` | Execute a parameterised SQL query | `DatabaseToken("users", dsn="postgres://...", allowed_patterns=["SELECT"])` |
+| `MultiUseDatabaseToken` | Database queries with N uses | `MultiUseDatabaseToken("reader", dsn="...", allowed_patterns=["SELECT"], max_uses=10)` |
+
+Queries use asyncpg with `$1, $2, ...` parameterised placeholders — no string interpolation. Semicolons, `--` comments, and `/* */` comments are rejected. The DSN is never exposed to the LLM.
+
+Requires the optional `db` dependency: `pip install linear-agentics[db]`
+
+#### Deploy tokens
+
+| Token | Purpose | Example |
+|-------|---------|---------|
+| `DeployToken` | Execute a one-time deployment | `DeployToken("prod", method="kubectl", target="production", image="app:v2")` |
+
+Generates a `kubectl set image` command scoped to the target namespace. Supports optional `rollback_to` for automated rollback.
+
+#### Secret tokens
+
+| Token | Purpose | Example |
+|-------|---------|---------|
+| `SecretToken` | Inject a credential into an action without exposing it to the LLM | See below |
+
+`SecretToken` wraps an inner token (`HttpToken` or `ShellToken`) and transparently injects a secret at execution time. The LLM sees the same tool interface as the inner token but never sees the secret value. The secret is also redacted from the `Proof` — it never appears in the audit trail.
+
+```python
+from linear_agentics.tokens import HttpToken, SecretToken, SecretInjection
+
+inner = HttpToken("api", url="https://api.example.com/deploy", methods=["POST"])
+token = SecretToken(
+    "authed-api",
+    secret_value="Bearer sk-secret-key",
+    injection=SecretInjection(kind="header", key="Authorization"),
+    inner_token=inner,
+)
+```
+
+Injection kinds:
+- `kind="header"` — injects as an HTTP header (requires `HttpToken` inner)
+- `kind="env"` — injects as an environment variable (requires `ShellToken` inner)
+
+#### Wait tokens
+
+| Token | Purpose | Example |
+|-------|---------|---------|
+| `WaitToken` | Controlled delay with a max-seconds cap | `WaitToken("pause", max_seconds=60)` |
+
+For polling workflows where the agent needs to wait between checks. The `max_seconds` cap prevents the agent from sleeping indefinitely.
+
+#### Token properties
 
 All tokens share these properties:
 - **Scoped**: a `ShellToken` with `allowed=["kubectl get pods"]` will reject `rm -rf /`
-- **Linear**: consumed on use, cannot be reused (or consumed N times for `MultiUseToken`)
+- **Linear**: consumed on use, cannot be reused (or consumed N times for multi-use variants)
 - **Audited**: every consumption produces an immutable `Proof` with timestamp, args, result, and duration
 - **Approval-aware**: set `requires_approval=True` to block execution until a human approves
 - **Self-reporting**: unused tokens emit a warning on garbage collection
@@ -158,27 +230,137 @@ capabilities = CapabilitySet([
 ])
 ```
 
-### Incident triage bots
+### Incident triage with database access
 
-An on-call agent that investigates alerts autonomously. It can read pod status, tail logs, and check health endpoints — but it cannot restart pods, scale deployments, or modify anything. The capability set is purely read-only. The agent gathers evidence and reports a diagnosis with severity and recommended actions. A human decides what to do next.
+An on-call agent that investigates alerts by reading logs, querying the database, and checking health endpoints — but cannot modify anything. The `DatabaseToken` uses parameterised queries to prevent SQL injection, and the DSN is never visible to the LLM.
 
 ```python
+from linear_agentics.tokens import (
+    MultiUseShellToken, MultiUseDatabaseToken, HttpToken, FileToken,
+)
+
 capabilities = CapabilitySet([
     MultiUseShellToken("pods", allowed=["kubectl get pods", "kubectl describe pod"], max_uses=5),
     MultiUseShellToken("logs", allowed=["kubectl logs"], max_uses=5),
-    MultiUseShellToken("events", allowed=["kubectl get events"], max_uses=3),
+    MultiUseDatabaseToken(
+        "query-db",
+        dsn="postgres://readonly:pass@db.internal/prod",
+        allowed_patterns=["SELECT"],
+        max_uses=10,
+    ),
     HttpToken("health", url="https://api.internal/health", methods=["GET"]),
+    FileToken("read-config", allowed_paths=["/etc/app/config"], mode="read"),
 ])
+```
+
+### Authenticated API calls with secret injection
+
+An agent that interacts with an external API using credentials that are never exposed to the LLM. The `SecretToken` wraps an `HttpToken` and injects the `Authorization` header at execution time. The secret never appears in the tool definition, the proof, or the audit trail.
+
+```python
+from linear_agentics.tokens import HttpToken, SecretToken, SecretInjection
+
+api_token = SecretToken(
+    "github-api",
+    secret_value=f"Bearer {os.environ['GITHUB_TOKEN']}",
+    injection=SecretInjection(kind="header", key="Authorization"),
+    inner_token=HttpToken("gh-deployments", url="https://api.github.com/repos/org/app/deployments", methods=["GET", "POST"]),
+)
+
+migration = SecretToken(
+    "run-migration",
+    secret_value=os.environ["DATABASE_URL"],
+    injection=SecretInjection(kind="env", key="DATABASE_URL"),
+    inner_token=ShellToken("migrate", allowed=["python manage.py migrate"]),
+    requires_approval=True,
+)
+```
+
+### Full-stack deployment with all token types
+
+An agent that performs a complete deployment: reads config, runs database migrations, deploys the service, waits for health checks, and calls an external API — with every action scoped, audited, and the sensitive ones gated behind approval or secret injection.
+
+```python
+import os
+from linear_agentics import Agent, CapabilitySet, Budget
+from linear_agentics.tokens import (
+    ShellToken, MultiUseShellToken, HttpToken, DeployToken,
+    FileToken, DatabaseToken, SecretToken, SecretInjection, WaitToken,
+)
+
+capabilities = CapabilitySet([
+    # Read deployment config from disk
+    FileToken("read-config", allowed_paths=["/etc/app"], mode="read"),
+
+    # Check current state
+    MultiUseShellToken("diagnostics",
+        allowed=["kubectl get pods", "kubectl logs", "kubectl describe pod"],
+        max_uses=5,
+    ),
+
+    # Run database migration with injected credentials
+    SecretToken(
+        "migrate",
+        secret_value=os.environ["DATABASE_URL"],
+        injection=SecretInjection(kind="env", key="DATABASE_URL"),
+        inner_token=ShellToken("migrate-cmd", allowed=["python manage.py migrate"]),
+        requires_approval=True,
+    ),
+
+    # Read-only query to verify migration
+    DatabaseToken(
+        "verify-migration",
+        dsn=os.environ["DATABASE_URL"],
+        allowed_patterns=["SELECT"],
+    ),
+
+    # Deploy to staging (no approval needed)
+    DeployToken("staging", method="kubectl", target="staging", image="app:v2.3.1"),
+
+    # Wait for rollout, then check health
+    WaitToken("wait-for-rollout", max_seconds=120),
+    HttpToken("health-check", url="https://staging.internal/health", methods=["GET"]),
+
+    # Deploy to production (requires human approval)
+    DeployToken("production", method="kubectl", target="production",
+                image="app:v2.3.1", rollback_to="app:v2.3.0",
+                requires_approval=True),
+
+    # Notify Slack via authenticated API
+    SecretToken(
+        "notify-slack",
+        secret_value=os.environ["SLACK_TOKEN"],
+        injection=SecretInjection(kind="header", key="Authorization"),
+        inner_token=HttpToken("slack", url="https://slack.com/api/chat.postMessage", methods=["POST"]),
+    ),
+])
+
+agent = Agent(
+    capabilities=capabilities,
+    budget=Budget(max_steps=30, timeout_minutes=20),
+    system_prompt=(
+        "Deploy app v2.3.1. Read the config, run migrations, deploy to staging, "
+        "verify health, then deploy to production. Notify Slack when done."
+    ),
+)
+
+result = await agent.run()
+print(result.audit_trail.to_json())
 ```
 
 ### Scoped database operations
 
-An agent that can run read queries against a database for analysis, but write operations require approval. The token system prevents the agent from running arbitrary SQL — only the specific queries you permit.
+An agent that can run read queries against a database for analysis. The `DatabaseToken` enforces parameterised queries with prefix matching — the agent cannot run `DELETE` or `DROP` statements even if it tries.
 
 ```python
 capabilities = CapabilitySet([
-    MultiUseShellToken("read-db", allowed=["psql -c 'SELECT"], max_uses=10),
-    ShellToken("run-migration", allowed=["flyway migrate"], requires_approval=True),
+    MultiUseDatabaseToken(
+        "analytics",
+        dsn="postgres://readonly@db.internal/analytics",
+        allowed_patterns=["SELECT"],
+        max_uses=10,
+    ),
+    FileToken("write-report", allowed_paths=["/tmp/reports"], mode="write"),
 ])
 ```
 
@@ -218,13 +400,18 @@ An agent managing resources across providers. Each provider interaction is a sep
 ## Installation
 
 ```
-pip install linear-agent-runtime
+pip install linear-agentics
 ```
 
 Requires Python 3.11+ and an [Anthropic API key](https://console.anthropic.com/).
 
 ```
 export ANTHROPIC_API_KEY=your-key
+```
+
+For database token support:
+```
+pip install linear-agentics[db]
 ```
 
 ## Running the examples
@@ -246,3 +433,11 @@ python examples/capability_negotiation.py
 uv sync --all-extras
 uv run pytest tests/ -v
 ```
+
+### Mutation testing
+
+```bash
+uv run mutmut run
+```
+
+See [docs/MUTANT_HUNTING.md](docs/MUTANT_HUNTING.md) for strategies on analyzing surviving mutants.
