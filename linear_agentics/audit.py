@@ -49,6 +49,20 @@ class ErrorRecord:
         return asdict(self)
 
 
+@dataclass(frozen=True)
+class NegotiationRecord:
+    """Record of a capability negotiation attempt."""
+
+    requested_scope: str
+    justification: str
+    granted_token: str | None  # token name if granted, None if denied
+    provider_type: str
+    timestamp: str
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -60,12 +74,16 @@ class AuditTrail:
     proofs: list[Proof] = field(default_factory=list)
     approvals: list[ApprovalRecord] = field(default_factory=list)
     errors: list[ErrorRecord] = field(default_factory=list)
+    negotiations: list[NegotiationRecord] = field(default_factory=list)
 
     def record_proof(self, proof: Proof) -> None:
         self.proofs.append(proof)
 
     def record_approval(self, record: ApprovalRecord) -> None:
         self.approvals.append(record)
+
+    def record_negotiation(self, record: NegotiationRecord) -> None:
+        self.negotiations.append(record)
 
     def record_error(self, token_name: str, error: Exception) -> None:
         self.errors.append(
@@ -83,6 +101,7 @@ class AuditTrail:
                 "proofs": [p.to_dict() for p in self.proofs],
                 "approvals": [a.to_dict() for a in self.approvals],
                 "errors": [e.to_dict() for e in self.errors],
+                "negotiations": [n.to_dict() for n in self.negotiations],
             },
             indent=indent,
         )
@@ -95,6 +114,12 @@ class AuditTrail:
             dur = f"{p.duration_ms:.0f}ms"
             summary = p.result_summary[:30] if p.result_summary else ""
             lines.append(f"{i:<4} {p.token_name:<25} {p.scope:<20} {dur:>10}  {summary}")
+        if self.negotiations:
+            lines.append("")
+            lines.append("Negotiations:")
+            for n in self.negotiations:
+                status = f"granted:{n.granted_token}" if n.granted_token else "denied"
+                lines.append(f"  [{status}] {n.requested_scope}: {n.justification}")
         if self.errors:
             lines.append("")
             lines.append("Errors:")

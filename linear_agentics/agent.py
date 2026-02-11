@@ -8,8 +8,9 @@ from dataclasses import dataclass, field
 import anthropic
 
 from .approval import ApprovalDeniedError, ApprovalGate
-from .audit import AuditTrail, Proof
+from .audit import AuditTrail, NegotiationRecord, Proof, _now_iso
 from .budget import Budget, BudgetExhaustedError, BudgetTimeoutError
+from .negotiation import CapabilityProvider
 from .tokens import LinearToken, TokenReusedError, TokenScopeError
 
 
@@ -27,6 +28,12 @@ class CapabilitySet:
 
     def get_token(self, tool_name: str) -> LinearToken | None:
         return self._by_tool_name.get(tool_name)
+
+    def add_token(self, token: LinearToken) -> None:
+        """Add a token to the capability set at runtime."""
+        self.tokens.append(token)
+        tool_def = token.to_tool_definition()
+        self._by_tool_name[tool_def["name"]] = token
 
     def to_tool_definitions(self) -> list[dict]:
         return [t.to_tool_definition() for t in self.tokens]
@@ -72,12 +79,19 @@ class Agent:
         llm_model: str = "claude-sonnet-4-5-20250929",
         system_prompt: str = "",
         approval_gate: ApprovalGate | None = None,
+        capability_provider: CapabilityProvider | None = None,
+        candidate_tokens: list[LinearToken] | None = None,
+        max_negotiations: int = 3,
     ) -> None:
         self.capabilities = capabilities
         self.budget = budget
         self.llm_model = llm_model
         self.system_prompt = system_prompt
         self.approval_gate = approval_gate or ApprovalGate()
+        self.capability_provider = capability_provider
+        self.candidate_tokens = candidate_tokens or []
+        self.max_negotiations = max_negotiations
+        self._negotiations_used = 0
         self._audit = AuditTrail()
         self._client = anthropic.AsyncAnthropic()
 
@@ -101,6 +115,30 @@ class Agent:
                 "required": ["message"],
             },
         })
+
+        if self.capability_provider and self.candidate_tokens:
+            tools.append({
+                "name": "request_capability",
+                "description": (
+                    "Request an additional capability you don't currently have. "
+                    f"{self.max_negotiations} requests allowed per run. "
+                    "Provide the scope you need and justify why."
+                ),
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "scope": {
+                            "type": "string",
+                            "description": "The capability scope needed",
+                        },
+                        "justification": {
+                            "type": "string",
+                            "description": "Why you need this capability",
+                        },
+                    },
+                    "required": ["scope", "justification"],
+                },
+            })
 
         messages: list[dict] = []
         final_message = ""
@@ -188,6 +226,9 @@ class Agent:
             else:
                 return "Approval denied. Do not proceed with this action."
 
+        if tool_name == "request_capability":
+            return await self._handle_capability_request(tool_input)
+
         token = self.capabilities.get_token(tool_name)
         if token is None:
             return f"Error: Unknown tool '{tool_name}'. Not in capability set."
@@ -215,3 +256,45 @@ class Agent:
         except Exception as e:
             self._audit.record_error(token.name, e)
             return f"Error executing '{tool_name}': {e}"
+
+    async def _handle_capability_request(self, tool_input: dict) -> str:
+        """Handle a request_capability meta-tool call."""
+        scope = tool_input.get("scope", "")
+        justification = tool_input.get("justification", "")
+
+        def _make_record(granted_name: str | None) -> NegotiationRecord:
+            return NegotiationRecord(
+                requested_scope=scope,
+                justification=justification,
+                granted_token=granted_name,
+                provider_type=type(self.capability_provider).__name__,
+                timestamp=_now_iso(),
+            )
+
+        if not self.capability_provider:
+            self._audit.record_negotiation(_make_record(None))
+            return "Error: Capability negotiation not configured."
+
+        if self._negotiations_used >= self.max_negotiations:
+            self._audit.record_negotiation(_make_record(None))
+            return (
+                f"Error: Maximum negotiations ({self.max_negotiations}) exhausted. "
+                "Work with your existing capabilities."
+            )
+
+        self._negotiations_used += 1
+
+        granted = await self.capability_provider.request_capability(
+            requested_scope=scope,
+            justification=justification,
+            candidates=self.candidate_tokens,
+        )
+
+        if granted is None:
+            self._audit.record_negotiation(_make_record(None))
+            return "Capability request denied. Work with your existing capabilities."
+
+        # Add granted token to the live capability set
+        self.capabilities.add_token(granted)
+        self._audit.record_negotiation(_make_record(granted.name))
+        return f"Capability granted: {granted.name} ({granted.scope}). You can now use it."

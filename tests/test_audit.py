@@ -75,4 +75,4 @@ class TestAuditTrail:
     def test_empty_trail(self):
         trail = AuditTrail()
         data = json.loads(trail.to_json())
-        assert data == {"proofs": [], "approvals": [], "errors": []}
+        assert data == {"proofs": [], "approvals": [], "errors": [], "negotiations": []}

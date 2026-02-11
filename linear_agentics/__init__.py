@@ -2,8 +2,9 @@
 
 from .agent import Agent, AgentResult, CapabilitySet
 from .approval import ApprovalDeniedError, ApprovalGate, ApprovalTimeoutError
-from .audit import ApprovalRecord, AuditTrail, ErrorRecord, Proof
+from .audit import ApprovalRecord, AuditTrail, ErrorRecord, NegotiationRecord, Proof
 from .budget import Budget, BudgetExhaustedError, BudgetTimeoutError
+from .negotiation import HumanCapabilityProvider, SupervisorAgentProvider
 from .tokens import (
     DeployToken,
     HttpToken,
@@ -30,12 +31,15 @@ __all__ = [
     "CapabilitySet",
     "DeployToken",
     "ErrorRecord",
+    "HumanCapabilityProvider",
     "HttpToken",
     "LinearToken",
     "MultiUseShellToken",
     "MultiUseToken",
+    "NegotiationRecord",
     "Proof",
     "ShellToken",
+    "SupervisorAgentProvider",
     "TokenError",
     "TokenReusedError",
     "TokenScopeError",
