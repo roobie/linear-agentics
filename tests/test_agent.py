@@ -6,9 +6,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from linear_agent.agent import Agent, AgentResult, CapabilitySet
-from linear_agent.budget import Budget
-from linear_agent.tokens import ShellToken
+from linear_agentics.agent import Agent, AgentResult, CapabilitySet
+from linear_agentics.budget import Budget
+from linear_agentics.tokens import ShellToken
 
 
 class TestCapabilitySet:

@@ -11,8 +11,8 @@ Usage:
 
 import asyncio
 
-from linear_agent import Agent, Budget, CapabilitySet, HttpToken
-from linear_agent.tokens import MultiUseShellToken
+from linear_agentics import Agent, Budget, CapabilitySet, HttpToken
+from linear_agentics.tokens import MultiUseShellToken
 
 
 async def main():

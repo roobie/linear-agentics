@@ -5,8 +5,8 @@
 Linear Agent Runtime wraps infrastructure actions in use-once capability tokens. An LLM agent can only execute what you explicitly grant — every action is scoped, audited, and consumed on use. Destructive operations require human approval. Budget limits prevent runaway execution. When the agent finishes, you get a cryptographic-style audit trail of everything it did.
 
 ```python
-from linear_agent import Agent, CapabilitySet, Budget
-from linear_agent.tokens import ShellToken, HttpToken, DeployToken
+from linear_agentics import Agent, CapabilitySet, Budget
+from linear_agentics.tokens import ShellToken, HttpToken, DeployToken
 
 capabilities = CapabilitySet([
     ShellToken("read-pods", allowed=["kubectl get pods"]),
@@ -53,7 +53,7 @@ Audit trail captures everything as structured JSON
 
 ## Library overview
 
-### Tokens (`linear_agent.tokens`)
+### Tokens (`linear_agentics.tokens`)
 
 Tokens are the core primitive. Each token is a scoped, auditable permit for a single action.
 
@@ -71,7 +71,7 @@ All tokens share these properties:
 - **Approval-aware**: set `requires_approval=True` to block execution until a human approves
 - **Self-reporting**: unused tokens emit a warning on garbage collection
 
-### Budget (`linear_agent.Budget`)
+### Budget (`linear_agentics.Budget`)
 
 Prevents runaway agents with two hard limits:
 
@@ -82,7 +82,7 @@ Prevents runaway agents with two hard limits:
 budget = Budget(max_steps=20, timeout_minutes=15)
 ```
 
-### Agent (`linear_agent.Agent`)
+### Agent (`linear_agentics.Agent`)
 
 The execution loop. Takes a `CapabilitySet`, a `Budget`, and a system prompt. Calls the Anthropic API, routes tool calls through the token layer, and returns an `AgentResult` with the full audit trail.
 
@@ -95,11 +95,11 @@ result.tokens_unused     # names of tokens never consumed
 result.budget_remaining  # steps left
 ```
 
-### Approval (`linear_agent.ApprovalGate`)
+### Approval (`linear_agentics.ApprovalGate`)
 
 Human-in-the-loop for sensitive actions. When an agent tries to consume a token with `requires_approval=True`, execution pauses and prompts for confirmation via CLI. The agent cannot proceed until a human types `yes`.
 
-### Audit (`linear_agent.AuditTrail`)
+### Audit (`linear_agentics.AuditTrail`)
 
 Structured record of everything the agent did:
 

@@ -4,7 +4,7 @@ import time
 
 import pytest
 
-from linear_agent.budget import Budget, BudgetExhaustedError, BudgetTimeoutError
+from linear_agentics.budget import Budget, BudgetExhaustedError, BudgetTimeoutError
 
 
 class TestBudget:

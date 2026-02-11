@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from linear_agent.audit import AuditTrail, ErrorRecord, Proof
+from linear_agentics.audit import AuditTrail, ErrorRecord, Proof
 
 
 class TestProof:

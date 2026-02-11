@@ -5,7 +5,7 @@ import warnings
 
 import pytest
 
-from linear_agent.tokens import (
+from linear_agentics.tokens import (
     DeployToken,
     HttpToken,
     LinearToken,
@@ -13,7 +13,7 @@ from linear_agent.tokens import (
     ShellToken,
     TokenReusedError,
 )
-from linear_agent.actions import CommandNotAllowedError
+from linear_agentics.actions import CommandNotAllowedError
 
 
 class TestShellToken:
