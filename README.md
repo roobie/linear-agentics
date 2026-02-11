@@ -1,8 +1,8 @@
-# Linear Agent Runtime
+# Linear Agentics
 
 **Give your AI agent exactly the capabilities it needs, nothing more, and prove what it did.**
 
-Linear Agent Runtime wraps infrastructure actions in use-once capability tokens. An LLM agent can only execute what you explicitly grant — every action is scoped, audited, and consumed on use. Destructive operations require human approval. Budget limits prevent runaway execution. When the agent finishes, you get a cryptographic-style audit trail of everything it did.
+Linear Agentics wraps infrastructure actions in use-once capability tokens. An LLM agent can only execute what you explicitly grant — every action is scoped, audited, and consumed on use. Destructive operations require human approval. Budget limits prevent runaway execution. When the agent needs capabilities it wasn't granted, it can negotiate for additional tokens from a human or supervisor agent. When the agent finishes, you get an audit trail of everything it did.
 
 ```python
 from linear_agentics import Agent, CapabilitySet, Budget
@@ -25,7 +25,7 @@ result = await agent.run()
 print(result.audit_trail.to_json())
 ```
 
-The agent sees these as LLM tools. It calls them. Each call consumes the token. Try to call it twice — `TokenReusedError`. Try a command outside scope — `CommandNotAllowedError`. Exceed the step budget — `BudgetExhaustedError`. Every action is recorded as an immutable `Proof`.
+The agent sees these as LLM tools. It calls them. Each call consumes the token. Try to call it twice — `TokenReusedError`. Try a command outside scope — `CommandNotAllowedError`. Exceed the step budget — `BudgetExhaustedError`. Need a capability you don't have? Call `request_capability` to negotiate for it. Every action is recorded as an immutable `Proof`.
 
 ## How it works
 
@@ -46,6 +46,9 @@ Action layer executes (subprocess, HTTP, kubectl)
   |
   v
 Approval gate blocks if token requires human sign-off
+  |
+  v
+Capability negotiation: agent requests additional tokens if needed
   |
   v
 Audit trail captures everything as structured JSON
@@ -99,12 +102,42 @@ result.budget_remaining  # steps left
 
 Human-in-the-loop for sensitive actions. When an agent tries to consume a token with `requires_approval=True`, execution pauses and prompts for confirmation via CLI. The agent cannot proceed until a human types `yes`.
 
+### Capability Negotiation (`linear_agentics.negotiation`)
+
+When an agent needs a capability it wasn't initially granted, it can request one at runtime via the `request_capability` meta-tool. Requests are evaluated by a `CapabilityProvider` — either a human operator (`HumanCapabilityProvider`) or a supervisor agent (`SupervisorAgentProvider`).
+
+Negotiation is constrained by:
+- **Candidate list**: only pre-configured tokens can be granted (candidates can overlap with initial tokens)
+- **Negotiation budget**: a configurable `max_negotiations` limits how many requests per run
+
+```python
+from linear_agentics import Agent, CapabilitySet, Budget, HumanCapabilityProvider
+from linear_agentics.tokens import ShellToken, HttpToken
+
+agent = Agent(
+    capabilities=CapabilitySet([
+        ShellToken("read-logs", allowed=["kubectl logs"]),
+    ]),
+    budget=Budget(max_steps=15, timeout_minutes=10),
+    system_prompt="Investigate the issue. Request write access if you need to fix it.",
+    capability_provider=HumanCapabilityProvider(),
+    candidate_tokens=[
+        HttpToken("create-incident", url="https://api.internal/incidents", methods=["POST"]),
+        HttpToken("check-metrics", url="https://api.internal/metrics", methods=["GET"]),
+    ],
+    max_negotiations=2,
+)
+```
+
+Every negotiation attempt — granted or denied — is recorded as a `NegotiationRecord` in the audit trail.
+
 ### Audit (`linear_agentics.AuditTrail`)
 
 Structured record of everything the agent did:
 
 - `proofs` — immutable records of each token consumption (token name, scope, args, timestamp, result summary, duration)
 - `approvals` — human approval decisions with approver identity
+- `negotiations` — capability negotiation attempts (requested scope, justification, granted or denied, provider type)
 - `errors` — any failures (scope violations, reuse attempts, execution errors)
 
 Output as JSON (`to_json()`) or a formatted CLI table (`to_table()`).
@@ -153,6 +186,31 @@ capabilities = CapabilitySet([
 
 An agent that validates a release candidate: runs tests, checks metrics, verifies canary health. Each check is a separate token. The audit trail becomes the release verification report — proof that every check was executed, what it returned, and how long it took.
 
+### Adaptive incident response
+
+An agent that starts with read-only access but can request write capabilities when it determines action is needed. It begins by investigating — reading logs, checking health endpoints, inspecting pod status. If it detects a real incident, it calls `request_capability` to ask a human operator for permission to create an incident ticket or update the status page. The human sees the justification and the specific capability being requested, and grants or denies it. The agent never gets blanket write access — only the specific action it justified.
+
+```python
+capabilities = CapabilitySet([
+    MultiUseShellToken("logs", allowed=["kubectl logs"], max_uses=5),
+    HttpToken("health", url="https://api.internal/health", methods=["GET"]),
+])
+
+candidates = [
+    HttpToken("create-incident", url="https://api.internal/incidents", methods=["POST"]),
+    HttpToken("update-status", url="https://api.internal/status", methods=["PUT"]),
+]
+
+agent = Agent(
+    capabilities=capabilities,
+    budget=Budget(max_steps=15, timeout_minutes=10),
+    system_prompt="Investigate the alert. If it's a real incident, request capabilities to respond.",
+    capability_provider=HumanCapabilityProvider(),
+    candidate_tokens=candidates,
+    max_negotiations=2,
+)
+```
+
 ### Multi-cloud operations
 
 An agent managing resources across providers. Each provider interaction is a separate scoped token — the agent can read from AWS and GCP but only write to the one you're migrating to. Cross-provider blast radius is eliminated by construction.
@@ -177,6 +235,9 @@ python examples/deploy_service.py
 
 # Read-only incident triage
 python examples/sre_triage.py
+
+# Agent with capability negotiation
+python examples/capability_negotiation.py
 ```
 
 ## Running the tests
