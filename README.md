@@ -27,6 +27,14 @@ print(result.audit_trail.to_json())
 
 The agent sees these as LLM tools. It calls them. Each call consumes the token. Try to call it twice — `TokenReusedError`. Try a command outside scope — `CommandNotAllowedError`. Exceed the step budget — `BudgetExhaustedError`. Need a capability you don't have? Call `request_capability` to negotiate for it. Every action is recorded as an immutable `Proof`.
 
+## Roadmap
+
+1. Simplify token management (templates, groups, auto-tuning)
+1. Nail the approval UX (async backends, Slack integration, approval context)
+1. Build a community (public case studies, conference talks, contributor docs)
+
+Feel free to open issues.
+
 ## How it works
 
 ```
