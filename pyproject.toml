@@ -1,3 +1,6 @@
+# This project uses `uv` as the python and project manager
+# I.e. use `uv run ...` to invoke `python`, `pytest` etc.
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
