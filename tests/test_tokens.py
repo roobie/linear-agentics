@@ -41,6 +41,10 @@ class TestShellToken:
         with pytest.raises(CommandNotAllowedError):
             await echo_token.consume(command="rm -rf /")
 
+    async def test_disallowed_command_composition_raises(self, echo_token):
+        with pytest.raises(CommandNotAllowedError):
+            await echo_token.consume(command="echo -n '' || rm -rf /")
+
     async def test_proof_recorded(self, echo_token):
         proof = await echo_token.consume(command="echo proof-test")
         assert echo_token.proof is proof

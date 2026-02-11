@@ -12,11 +12,28 @@ class CommandNotAllowedError(Exception):
     pass
 
 
-def _validate_command_prefix(command: str, allowed_prefixes: list[str]) -> None:
-    """Check that command starts with one of the allowed prefixes."""
+_SHELL_OPERATORS = frozenset(("||", "&&", ";", "|", "&"))
+
+
+def _validate_and_split(command: str, allowed_prefixes: list[str]) -> list[str]:
+    """Parse command into argv and check that it starts with an allowed prefix.
+
+    Rejects commands containing shell composition operators (||, &&, ;, |, &)
+    to prevent attempts at command chaining.
+    """
+    try:
+        argv = shlex.split(command)
+    except ValueError as e:
+        raise CommandNotAllowedError(f"Invalid command syntax: {e}")
+    shell_ops = _SHELL_OPERATORS.intersection(argv)
+    if shell_ops:
+        raise CommandNotAllowedError(
+            f"Command contains shell operators {shell_ops}: {command!r}"
+        )
     for prefix in allowed_prefixes:
-        if command == prefix or command.startswith(prefix + " "):
-            return
+        prefix_parts = shlex.split(prefix)
+        if argv[: len(prefix_parts)] == prefix_parts:
+            return argv
     raise CommandNotAllowedError(
         f"Command {command!r} not allowed. Permitted prefixes: {allowed_prefixes}"
     )
@@ -31,10 +48,10 @@ async def shell_exec(
 
     Returns stdout. Raises on validation failure or non-zero exit.
     """
-    _validate_command_prefix(command, allowed_prefixes)
+    argv = _validate_and_split(command, allowed_prefixes)
 
-    proc = await asyncio.create_subprocess_shell(
-        command,
+    proc = await asyncio.create_subprocess_exec(
+        *argv,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
