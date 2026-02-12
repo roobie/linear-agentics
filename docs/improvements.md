@@ -2,7 +2,7 @@
 
 ## Security
 
-- [ ] **Secret handling** (`tokens.py:565`) - `SecretToken` stores secrets as plain strings in memory. Consider using a secrets manager or encrypting at rest.
+- [x] ~~Secret handling~~ - `SecretToken` stores secrets as plain strings in memory. Consider using a secrets manager or encrypting at rest.
 - [ ] **Environment variable exposure** (`actions.py:129`) - `shell_exec_with_env` merges env vars but doesn't filter sensitive variables from being passed to subprocess.
 
 ## Code Quality
