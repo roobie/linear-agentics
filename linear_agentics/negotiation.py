@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import asyncio
-import sys
 from typing import TYPE_CHECKING, Protocol
 
+from .logger import get_logger
 from .tokens import LinearToken
 from .utils import _now_iso
+
+log = get_logger(__name__)
 
 if TYPE_CHECKING:
     from .agent import Agent
@@ -51,16 +53,12 @@ class HumanCapabilityProvider:
         if not matches:
             return None
 
-        print(f"\n{'=' * 60}", file=sys.stderr)
-        print("CAPABILITY REQUEST", file=sys.stderr)
-        print(f"{'=' * 60}", file=sys.stderr)
-        print(f"Requested scope: {requested_scope}", file=sys.stderr)
-        print(f"Justification: {justification}\n", file=sys.stderr)
-        print("Available candidates:", file=sys.stderr)
-        for i, token in enumerate(matches, 1):
-            print(f"  {i}. {token.name} ({token.scope})", file=sys.stderr)
-        print("  0. Deny request", file=sys.stderr)
-        print("\nEnter number to grant (0 to deny):", file=sys.stderr)
+        log.info(
+            "capability_request",
+            requested_scope=requested_scope,
+            justification=justification,
+            candidates=[{"name": t.name, "scope": t.scope} for t in matches],
+        )
 
         loop = asyncio.get_running_loop()
         try:

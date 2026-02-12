@@ -23,7 +23,7 @@
 
 - [ ] Add type hints for external deps - Install `anthropic-stubs` or add `type: ignore` comments for third-party APIs.
 - [ ] Add linting/formatting config - `pyproject.toml` lacks `ruff` or `mypy` configuration.
-- [ ] Add structured logging - Replace `print()` statements with `logging` module for production use.
+- [x] ~~Add structured logging~~ - Replace `print()` statements with `logging` module for production use.
 
 ## Reliability
 

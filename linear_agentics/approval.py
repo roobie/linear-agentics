@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-import sys
 
 from .audit import ApprovalRecord
+from .logger import get_logger
 from .utils import _now_iso
+
+log = get_logger(__name__)
 
 
 class ApprovalDeniedError(Exception):
@@ -28,11 +30,11 @@ class ApprovalGate:
 
         Blocks until the user responds or times out.
         """
-        print(f"\n{'=' * 60}", file=sys.stderr)
-        print(f"APPROVAL REQUIRED: {token_name}", file=sys.stderr)
-        print(f"{'=' * 60}", file=sys.stderr)
-        print(f"\n{message}\n", file=sys.stderr)
-        print(f"Type 'yes' to approve or 'no' to deny:", file=sys.stderr)
+        log.info(
+            "approval_required",
+            token_name=token_name,
+            message=message,
+        )
 
         loop = asyncio.get_running_loop()
         try:
