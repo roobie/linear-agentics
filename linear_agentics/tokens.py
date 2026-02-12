@@ -59,9 +59,7 @@ class LinearToken:
     def proof(self) -> Proof | None:
         return self._proof
 
-    def _mark_consumed(
-        self, args: dict, result_summary: str, duration_ms: float
-    ) -> Proof:
+    def _mark_consumed(self, args: dict, result_summary: str, duration_ms: float) -> Proof:
         self._consumed = True
         self._proof = Proof(
             token_name=self.name,
@@ -87,8 +85,7 @@ class LinearToken:
     def __del__(self) -> None:
         if not self._consumed:
             warnings.warn(
-                f"Token '{self.name}' was never consumed. "
-                "This may indicate an unused capability.",
+                f"Token '{self.name}' was never consumed. This may indicate an unused capability.",
                 stacklevel=1,
             )
 
@@ -118,10 +115,7 @@ class ShellToken(LinearToken):
         approval_note = " REQUIRES APPROVAL." if self.requires_approval else ""
         return {
             "name": f"shell_{self.name}",
-            "description": (
-                f"Run a shell command. Allowed prefixes: {self.allowed}. "
-                f"ONE USE ONLY.{approval_note}"
-            ),
+            "description": (f"Run a shell command. Allowed prefixes: {self.allowed}. ONE USE ONLY.{approval_note}"),
             "input_schema": {
                 "type": "object",
                 "properties": {
@@ -150,9 +144,7 @@ class HttpToken(LinearToken):
         self.url = url
         self.methods = methods
 
-    async def consume(
-        self, method: str | None = None, body: dict | None = None
-    ) -> Proof:
+    async def consume(self, method: str | None = None, body: dict | None = None) -> Proof:
         self._check_reuse()
         if method is None:
             method = self.methods[0]
@@ -160,17 +152,13 @@ class HttpToken(LinearToken):
         result = await http_request(self.url, method, self.methods, body=body)
         duration = (time.monotonic() - t0) * 1000
         summary = f"HTTP {result['status']}: {result['body'][:150]}"
-        return self._mark_consumed(
-            {"method": method, "url": self.url, "body": body}, summary, duration
-        )
+        return self._mark_consumed({"method": method, "url": self.url, "body": body}, summary, duration)
 
     def to_tool_definition(self) -> dict:
         approval_note = " REQUIRES APPROVAL." if self.requires_approval else ""
         return {
             "name": self.name,
-            "description": (
-                f"{'/'.join(self.methods)} {self.url}. ONE USE ONLY.{approval_note}"
-            ),
+            "description": (f"{'/'.join(self.methods)} {self.url}. ONE USE ONLY.{approval_note}"),
             "input_schema": {
                 "type": "object",
                 "properties": {
@@ -207,15 +195,10 @@ class DeployToken(LinearToken):
         self.target = target
         self.image = image
         self.rollback_to = rollback_to
-        self._deploy_command = (
-            f"kubectl set image deployment/app app={image} --namespace={target}"
-        )
+        self._deploy_command = f"kubectl set image deployment/app app={image} --namespace={target}"
         self._rollback_command: str | None = None
         if rollback_to:
-            self._rollback_command = (
-                f"kubectl set image deployment/app app={rollback_to} "
-                f"--namespace={target}"
-            )
+            self._rollback_command = f"kubectl set image deployment/app app={rollback_to} --namespace={target}"
 
     async def consume(self) -> Proof:
         self._check_reuse()
@@ -244,10 +227,7 @@ class DeployToken(LinearToken):
         approval_note = " REQUIRES APPROVAL." if self.requires_approval else ""
         return {
             "name": f"deploy_{self.name}",
-            "description": (
-                f"Deploy {self.image} to {self.target} via {self.method}. "
-                f"ONE USE ONLY.{approval_note}"
-            ),
+            "description": (f"Deploy {self.image} to {self.target} via {self.method}. ONE USE ONLY.{approval_note}"),
             "input_schema": {
                 "type": "object",
                 "properties": {},
@@ -283,9 +263,7 @@ class MultiUseToken(LinearToken):
 
     def _check_reuse(self) -> None:
         if self._use_count >= self.max_uses:
-            raise TokenReusedError(
-                f"Capability '{self.name}' exhausted ({self.max_uses}/{self.max_uses} uses)."
-            )
+            raise TokenReusedError(f"Capability '{self.name}' exhausted ({self.max_uses}/{self.max_uses} uses).")
 
     def _record_use(self, args: dict, result_summary: str, duration_ms: float) -> Proof:
         self._use_count += 1
@@ -314,8 +292,7 @@ class MultiUseToken(LinearToken):
     def __del__(self) -> None:
         if self._use_count == 0:
             warnings.warn(
-                f"MultiUseToken '{self.name}' was never used. "
-                "This may indicate an unused capability.",
+                f"MultiUseToken '{self.name}' was never used. This may indicate an unused capability.",
                 stacklevel=1,
             )
 
@@ -347,8 +324,7 @@ class MultiUseShellToken(MultiUseToken):
         return {
             "name": f"shell_{self.name}",
             "description": (
-                f"Run a shell command. Allowed prefixes: {self.allowed}. "
-                f"{self.uses_remaining} uses remaining.{approval_note}"
+                f"Run a shell command. Allowed prefixes: {self.allowed}. {self.uses_remaining} uses remaining.{approval_note}"
             ),
             "input_schema": {
                 "type": "object",
@@ -397,10 +373,7 @@ class _BaseFileToken:
     def _validate_operation(self, operation: str) -> None:
         allowed_ops = self._allowed_operations()
         if operation not in allowed_ops:
-            raise TokenScopeError(
-                f"Operation {operation!r} not allowed by mode {self.mode!r}. "
-                f"Allowed: {allowed_ops}"
-            )
+            raise TokenScopeError(f"Operation {operation!r} not allowed by mode {self.mode!r}. Allowed: {allowed_ops}")
 
     def _build_tool_definition(self, uses_remaining: int | None) -> dict:
         approval_note = " REQUIRES APPROVAL." if self.requires_approval else ""
@@ -422,15 +395,9 @@ class _BaseFileToken:
                 "description": "Content to write (required for write operations)",
             }
         if uses_remaining is not None:
-            desc = (
-                f"File access ({self.mode}) within {self.allowed_paths}. "
-                f"{uses_remaining} uses remaining.{approval_note}"
-            )
+            desc = f"File access ({self.mode}) within {self.allowed_paths}. {uses_remaining} uses remaining.{approval_note}"
         else:
-            desc = (
-                f"File access ({self.mode}) within {self.allowed_paths}. "
-                f"ONE USE ONLY.{approval_note}"
-            )
+            desc = f"File access ({self.mode}) within {self.allowed_paths}. ONE USE ONLY.{approval_note}"
         return {
             "name": f"file_{self.name}",
             "description": desc,
@@ -458,9 +425,7 @@ class FileToken(LinearToken):
         self.mode = base.mode
         self._base = base
 
-    async def consume(
-        self, operation: str, path: str, content: str | None = None
-    ) -> Proof:
+    async def consume(self, operation: str, path: str, content: str | None = None) -> Proof:
         self._check_reuse()
         self._base._validate_operation(operation)
         t0 = time.monotonic()
@@ -472,9 +437,7 @@ class FileToken(LinearToken):
             result = await file_write(path, content, self.allowed_paths)
         duration = (time.monotonic() - t0) * 1000
         summary = result[:200] if result else "(empty)"
-        return self._mark_consumed(
-            {"operation": operation, "path": path}, summary, duration
-        )
+        return self._mark_consumed({"operation": operation, "path": path}, summary, duration)
 
     def to_tool_definition(self) -> dict:
         return self._base._build_tool_definition(None)
@@ -497,9 +460,7 @@ class MultiUseFileToken(MultiUseToken):
         self.mode = base.mode
         self._base = base
 
-    async def consume(
-        self, operation: str, path: str, content: str | None = None
-    ) -> Proof:
+    async def consume(self, operation: str, path: str, content: str | None = None) -> Proof:
         self._check_reuse()
         self._base._validate_operation(operation)
         t0 = time.monotonic()
@@ -511,9 +472,7 @@ class MultiUseFileToken(MultiUseToken):
             result = await file_write(path, content, self.allowed_paths)
         duration = (time.monotonic() - t0) * 1000
         summary = result[:200] if result else "(empty)"
-        return self._record_use(
-            {"operation": operation, "path": path}, summary, duration
-        )
+        return self._record_use({"operation": operation, "path": path}, summary, duration)
 
     def to_tool_definition(self) -> dict:
         return self._base._build_tool_definition(self.uses_remaining)
@@ -563,9 +522,7 @@ class SecretToken(LinearToken):
             # the secret injected as a header.
             inner = self.inner_token
             if not isinstance(inner, HttpToken):
-                raise TokenScopeError(
-                    "header injection requires an HttpToken as inner_token"
-                )
+                raise TokenScopeError("header injection requires an HttpToken as inner_token")
             method = kwargs.get("method") or inner.methods[0]
             body = kwargs.get("body")
             headers = {self.injection.key: self._secret_value}
@@ -583,9 +540,7 @@ class SecretToken(LinearToken):
             # the secret as an environment variable.
             inner = self.inner_token
             if not isinstance(inner, ShellToken):
-                raise TokenScopeError(
-                    "env injection requires a ShellToken as inner_token"
-                )
+                raise TokenScopeError("env injection requires a ShellToken as inner_token")
             command = kwargs["command"]
             env_vars = {self.injection.key: self._secret_value}
             result_str = await shell_exec_with_env(
@@ -603,8 +558,7 @@ class SecretToken(LinearToken):
         redacted_args = {k: v for k, v in kwargs.items()}
         return self._mark_consumed(
             redacted_args,
-            f"[secret injected as {self.injection.kind}:{self.injection.key}] "
-            + result_summary,
+            f"[secret injected as {self.injection.kind}:{self.injection.key}] " + result_summary,
             duration,
         )
 
@@ -615,9 +569,7 @@ class SecretToken(LinearToken):
         return {
             "name": f"secret_{self.name}",
             "description": (
-                f"Execute with injected credential "
-                f"({self.injection.kind}:{self.injection.key}). "
-                f"ONE USE ONLY.{approval_note}"
+                f"Execute with injected credential ({self.injection.kind}:{self.injection.key}). ONE USE ONLY.{approval_note}"
             ),
             "input_schema": inner_def["input_schema"],
         }
@@ -649,18 +601,14 @@ class DatabaseToken(LinearToken):
         rows = await db_query(self._dsn, query, params, self.allowed_patterns)
         duration = (time.monotonic() - t0) * 1000
         summary = str(rows)[:200]
-        return self._mark_consumed(
-            {"query": query, "params": params}, summary, duration
-        )
+        return self._mark_consumed({"query": query, "params": params}, summary, duration)
 
     def to_tool_definition(self) -> dict:
         approval_note = " REQUIRES APPROVAL." if self.requires_approval else ""
         return {
             "name": f"db_{self.name}",
             "description": (
-                f"Execute a parameterised SQL query. "
-                f"Allowed patterns: {self.allowed_patterns}. "
-                f"ONE USE ONLY.{approval_note}"
+                f"Execute a parameterised SQL query. Allowed patterns: {self.allowed_patterns}. ONE USE ONLY.{approval_note}"
             ),
             "input_schema": {
                 "type": "object",
@@ -752,9 +700,7 @@ class WaitToken(LinearToken):
     async def consume(self, seconds: int, reason: str = "") -> Proof:
         self._check_reuse()
         if seconds > self.max_seconds:
-            raise ValueError(
-                f"Requested {seconds}s exceeds maximum of {self.max_seconds}s"
-            )
+            raise ValueError(f"Requested {seconds}s exceeds maximum of {self.max_seconds}s")
         if seconds < 0:
             raise ValueError("seconds must be non-negative")
         t0 = time.monotonic()
@@ -763,18 +709,13 @@ class WaitToken(LinearToken):
         summary = f"Waited {seconds}s"
         if reason:
             summary += f" ({reason})"
-        return self._mark_consumed(
-            {"seconds": seconds, "reason": reason}, summary, duration
-        )
+        return self._mark_consumed({"seconds": seconds, "reason": reason}, summary, duration)
 
     def to_tool_definition(self) -> dict:
         approval_note = " REQUIRES APPROVAL." if self.requires_approval else ""
         return {
             "name": f"wait_{self.name}",
-            "description": (
-                f"Wait/sleep for a specified duration (max {self.max_seconds}s). "
-                f"ONE USE ONLY.{approval_note}"
-            ),
+            "description": (f"Wait/sleep for a specified duration (max {self.max_seconds}s). ONE USE ONLY.{approval_note}"),
             "input_schema": {
                 "type": "object",
                 "properties": {

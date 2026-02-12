@@ -60,9 +60,7 @@ class TestBudget:
         b = Budget(max_steps=100, timeout_minutes=5.0)
         b.start()
         # Mock elapsed to return exactly the timeout
-        with patch.object(
-            type(b), "elapsed", new_callable=PropertyMock
-        ) as mock_elapsed:
+        with patch.object(type(b), "elapsed", new_callable=PropertyMock) as mock_elapsed:
             mock_elapsed.return_value = timedelta(minutes=5.0)
             # Exactly at the limit should NOT raise (strict >)
             b.check_timeout()

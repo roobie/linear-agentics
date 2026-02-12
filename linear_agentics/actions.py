@@ -60,16 +60,12 @@ def _validate_and_split(command: str, allowed_prefixes: list[str]) -> list[str]:
         raise CommandNotAllowedError(f"Invalid command syntax: {e}")
     shell_ops = _SHELL_OPERATORS.intersection(argv)
     if shell_ops:
-        raise CommandNotAllowedError(
-            f"Command contains shell operators {shell_ops}: {command!r}"
-        )
+        raise CommandNotAllowedError(f"Command contains shell operators {shell_ops}: {command!r}")
     for prefix in allowed_prefixes:
         prefix_parts = shlex.split(prefix)
         if argv[: len(prefix_parts)] == prefix_parts:
             return argv
-    raise CommandNotAllowedError(
-        f"Command {command!r} not allowed. Permitted prefixes: {allowed_prefixes}"
-    )
+    raise CommandNotAllowedError(f"Command {command!r} not allowed. Permitted prefixes: {allowed_prefixes}")
 
 
 async def shell_exec(
@@ -89,18 +85,13 @@ async def shell_exec(
         stderr=asyncio.subprocess.PIPE,
     )
     try:
-        stdout, stderr = await asyncio.wait_for(
-            proc.communicate(), timeout=timeout_seconds
-        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout_seconds)
     except asyncio.TimeoutError:
         proc.kill()
         raise TimeoutError(f"Command timed out after {timeout_seconds}s: {command}")
 
     if proc.returncode != 0:
-        raise RuntimeError(
-            f"Command failed (exit {proc.returncode}): {command}\n"
-            f"stderr: {stderr.decode(errors='replace')}"
-        )
+        raise RuntimeError(f"Command failed (exit {proc.returncode}): {command}\nstderr: {stderr.decode(errors='replace')}")
     return stdout.decode(errors="replace")
 
 
@@ -118,9 +109,7 @@ async def http_request(
     """
     method_upper = method.upper()
     if method_upper not in [m.upper() for m in allowed_methods]:
-        raise ValueError(
-            f"HTTP method {method_upper!r} not allowed. Permitted: {allowed_methods}"
-        )
+        raise ValueError(f"HTTP method {method_upper!r} not allowed. Permitted: {allowed_methods}")
 
     client = get_http_client(timeout_seconds)
     response = await client.request(
@@ -157,18 +146,13 @@ async def shell_exec_with_env(
         env=merged_env,
     )
     try:
-        stdout, stderr = await asyncio.wait_for(
-            proc.communicate(), timeout=timeout_seconds
-        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout_seconds)
     except asyncio.TimeoutError:
         proc.kill()
         raise TimeoutError(f"Command timed out after {timeout_seconds}s: {command}")
 
     if proc.returncode != 0:
-        raise RuntimeError(
-            f"Command failed (exit {proc.returncode}): {command}\n"
-            f"stderr: {stderr.decode(errors='replace')}"
-        )
+        raise RuntimeError(f"Command failed (exit {proc.returncode}): {command}\nstderr: {stderr.decode(errors='replace')}")
     return stdout.decode(errors="replace")
 
 
@@ -191,10 +175,7 @@ def _validate_file_path(path: str, allowed_paths: list[str]) -> str:
         # Allow children of allowed directories
         if resolved.startswith(allowed_resolved + os.sep):
             return resolved
-    raise FileAccessError(
-        f"Path {path!r} (resolved: {resolved!r}) is not within "
-        f"allowed paths: {allowed_paths}"
-    )
+    raise FileAccessError(f"Path {path!r} (resolved: {resolved!r}) is not within allowed paths: {allowed_paths}")
 
 
 async def file_read(path: str, allowed_paths: list[str]) -> str:
@@ -229,9 +210,7 @@ def _validate_query(query: str, allowed_patterns: list[str]) -> None:
     Rejects multi-statement queries (containing ``;``) and SQL comments.
     """
     if ";" in query:
-        raise QueryNotAllowedError(
-            "Query contains ';' — multi-statement queries are not allowed"
-        )
+        raise QueryNotAllowedError("Query contains ';' — multi-statement queries are not allowed")
     if _SQL_COMMENT_RE.search(query):
         raise QueryNotAllowedError("Query contains SQL comments — not allowed")
     normalised = " ".join(query.split()).strip()
@@ -239,9 +218,7 @@ def _validate_query(query: str, allowed_patterns: list[str]) -> None:
         pattern_normalised = " ".join(pattern.split()).strip()
         if normalised.upper().startswith(pattern_normalised.upper()):
             return
-    raise QueryNotAllowedError(
-        f"Query not allowed. Permitted prefixes: {allowed_patterns}"
-    )
+    raise QueryNotAllowedError(f"Query not allowed. Permitted prefixes: {allowed_patterns}")
 
 
 async def db_query(
@@ -259,19 +236,14 @@ async def db_query(
     try:
         import asyncpg  # noqa: F811
     except ImportError:
-        raise ImportError(
-            "asyncpg is required for DatabaseToken. "
-            "Install it with: pip install linear-agentics[db]"
-        )
+        raise ImportError("asyncpg is required for DatabaseToken. Install it with: pip install linear-agentics[db]")
 
     _validate_query(query, allowed_patterns)
 
     conn = await asyncio.wait_for(asyncpg.connect(dsn), timeout=timeout_seconds)
     try:
         params = params or []
-        result = await asyncio.wait_for(
-            conn.fetch(query, *params), timeout=timeout_seconds
-        )
+        result = await asyncio.wait_for(conn.fetch(query, *params), timeout=timeout_seconds)
         return [dict(row) for row in result]
     finally:
         await conn.close()

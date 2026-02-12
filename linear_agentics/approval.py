@@ -41,9 +41,7 @@ class ApprovalGate:
                 timeout=self.timeout_seconds,
             )
         except asyncio.TimeoutError:
-            raise ApprovalTimeoutError(
-                f"Approval for '{token_name}' timed out after {self.timeout_seconds}s"
-            )
+            raise ApprovalTimeoutError(f"Approval for '{token_name}' timed out after {self.timeout_seconds}s")
 
         approved = response.strip().lower() in ("yes", "y")
         return ApprovalRecord(

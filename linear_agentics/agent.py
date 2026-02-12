@@ -185,9 +185,7 @@ class Agent:
                 # Process each tool call
                 tool_results = []
                 for tool_use in tool_uses:
-                    result_text = await self._handle_tool_call(
-                        tool_use.name, tool_use.input
-                    )
+                    result_text = await self._handle_tool_call(tool_use.name, tool_use.input)
                     tool_results.append(
                         {
                             "type": "tool_result",
@@ -248,9 +246,7 @@ class Agent:
             )
             self._audit.record_approval(record)
             if not record.approved:
-                self._audit.record_error(
-                    token.name, ApprovalDeniedError("Human denied approval")
-                )
+                self._audit.record_error(token.name, ApprovalDeniedError("Human denied approval"))
                 return f"Error: Approval denied for '{token.name}'."
 
         try:
@@ -284,10 +280,7 @@ class Agent:
 
         if self._negotiations_used >= self.max_negotiations:
             self._audit.record_negotiation(_make_record(None))
-            return (
-                f"Error: Maximum negotiations ({self.max_negotiations}) exhausted. "
-                "Work with your existing capabilities."
-            )
+            return f"Error: Maximum negotiations ({self.max_negotiations}) exhausted. Work with your existing capabilities."
 
         self._negotiations_used += 1
 
@@ -304,6 +297,4 @@ class Agent:
         # Add granted token to the live capability set
         self.capabilities.add_token(granted)
         self._audit.record_negotiation(_make_record(granted.name))
-        return (
-            f"Capability granted: {granted.name} ({granted.scope}). You can now use it."
-        )
+        return f"Capability granted: {granted.name} ({granted.scope}). You can now use it."

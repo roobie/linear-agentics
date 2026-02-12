@@ -90,14 +90,10 @@ class TestHttpToken:
     async def test_consume_with_mock(self):
         token = HttpToken("health", url="https://example.com/health", methods=["GET"])
         mock_result = {"status": 200, "body": "ok"}
-        with patch(
-            "linear_agentics.tokens.http_request", new_callable=AsyncMock
-        ) as mock_req:
+        with patch("linear_agentics.tokens.http_request", new_callable=AsyncMock) as mock_req:
             mock_req.return_value = mock_result
             proof = await token.consume(method="GET")
-            mock_req.assert_called_once_with(
-                "https://example.com/health", "GET", ["GET"], body=None
-            )
+            mock_req.assert_called_once_with("https://example.com/health", "GET", ["GET"], body=None)
         assert proof.token_name == "health"
         assert proof.args == {
             "method": "GET",
@@ -110,28 +106,20 @@ class TestHttpToken:
     async def test_consume_default_method(self):
         token = HttpToken("api", url="https://example.com/api", methods=["POST", "GET"])
         mock_result = {"status": 201, "body": "created"}
-        with patch(
-            "linear_agentics.tokens.http_request", new_callable=AsyncMock
-        ) as mock_req:
+        with patch("linear_agentics.tokens.http_request", new_callable=AsyncMock) as mock_req:
             mock_req.return_value = mock_result
             proof = await token.consume()
             # Default method should be the first in the list
-            mock_req.assert_called_once_with(
-                "https://example.com/api", "POST", ["POST", "GET"], body=None
-            )
+            mock_req.assert_called_once_with("https://example.com/api", "POST", ["POST", "GET"], body=None)
         assert proof.args["method"] == "POST"
 
     async def test_consume_with_body(self):
         token = HttpToken("api", url="https://example.com/api", methods=["POST"])
         mock_result = {"status": 200, "body": "ok"}
-        with patch(
-            "linear_agentics.tokens.http_request", new_callable=AsyncMock
-        ) as mock_req:
+        with patch("linear_agentics.tokens.http_request", new_callable=AsyncMock) as mock_req:
             mock_req.return_value = mock_result
             proof = await token.consume(method="POST", body={"key": "value"})
-            mock_req.assert_called_once_with(
-                "https://example.com/api", "POST", ["POST"], body={"key": "value"}
-            )
+            mock_req.assert_called_once_with("https://example.com/api", "POST", ["POST"], body={"key": "value"})
         assert proof.args["body"] == {"key": "value"}
 
     async def test_to_tool_definition(self):
@@ -149,9 +137,7 @@ class TestHttpToken:
         token._consumed = True
 
     async def test_to_tool_definition_with_approval(self):
-        token = HttpToken(
-            "api", url="https://example.com", methods=["POST"], requires_approval=True
-        )
+        token = HttpToken("api", url="https://example.com", methods=["POST"], requires_approval=True)
         tool_def = token.to_tool_definition()
         assert "REQUIRES APPROVAL" in tool_def["description"]
         token._consumed = True
@@ -191,12 +177,8 @@ class TestDeployToken:
         token._consumed = True
 
     async def test_consume_with_mock(self):
-        token = DeployToken(
-            "staging", method="kubectl", target="staging", image="app:v1"
-        )
-        with patch(
-            "linear_agentics.tokens.shell_exec", new_callable=AsyncMock
-        ) as mock_exec:
+        token = DeployToken("staging", method="kubectl", target="staging", image="app:v1")
+        with patch("linear_agentics.tokens.shell_exec", new_callable=AsyncMock) as mock_exec:
             mock_exec.return_value = "deployment.apps/app image updated"
             proof = await token.consume()
             mock_exec.assert_called_once()
@@ -297,9 +279,7 @@ class TestFileToken:
 
     async def test_write_allowed_path(self, tmp_path, write_token):
         f = tmp_path / "artifact.txt"
-        proof = await write_token.consume(
-            operation="write", path=str(f), content="hello"
-        )
+        proof = await write_token.consume(operation="write", path=str(f), content="hello")
         assert f.read_text() == "hello"
         assert "bytes" in proof.result_summary
 
@@ -310,9 +290,7 @@ class TestFileToken:
 
     async def test_mode_enforcement_read_only(self, tmp_path, read_token):
         with pytest.raises(TokenScopeError, match="not allowed"):
-            await read_token.consume(
-                operation="write", path=str(tmp_path / "x"), content="bad"
-            )
+            await read_token.consume(operation="write", path=str(tmp_path / "x"), content="bad")
 
     async def test_mode_enforcement_write_only(self, tmp_path, write_token):
         with pytest.raises(TokenScopeError, match="not allowed"):
@@ -368,9 +346,7 @@ class TestMultiUseFileToken:
     async def test_multiple_reads(self, tmp_path):
         f = tmp_path / "data.txt"
         f.write_text("content")
-        token = MultiUseFileToken(
-            "reader", allowed_paths=[str(tmp_path)], mode="read", max_uses=3
-        )
+        token = MultiUseFileToken("reader", allowed_paths=[str(tmp_path)], mode="read", max_uses=3)
         await token.consume(operation="read", path=str(f))
         assert token.uses_remaining == 2
         await token.consume(operation="read", path=str(f))
@@ -381,9 +357,7 @@ class TestMultiUseFileToken:
     async def test_exhausted_raises(self, tmp_path):
         f = tmp_path / "data.txt"
         f.write_text("content")
-        token = MultiUseFileToken(
-            "reader", allowed_paths=[str(tmp_path)], mode="read", max_uses=1
-        )
+        token = MultiUseFileToken("reader", allowed_paths=[str(tmp_path)], mode="read", max_uses=1)
         await token.consume(operation="read", path=str(f))
         with pytest.raises(TokenReusedError, match="exhausted"):
             await token.consume(operation="read", path=str(f))
@@ -399,9 +373,7 @@ class TestSecretToken:
             inner_token=inner,
         )
         mock_result = {"status": 200, "body": "ok"}
-        with patch(
-            "linear_agentics.tokens.http_request", new_callable=AsyncMock
-        ) as mock_req:
+        with patch("linear_agentics.tokens.http_request", new_callable=AsyncMock) as mock_req:
             mock_req.return_value = mock_result
             proof = await token.consume(method="POST", body={"action": "deploy"})
 
@@ -427,9 +399,7 @@ class TestSecretToken:
             injection=SecretInjection(kind="env", key="DATABASE_URL"),
             inner_token=inner,
         )
-        with patch(
-            "linear_agentics.tokens.shell_exec_with_env", new_callable=AsyncMock
-        ) as mock_exec:
+        with patch("linear_agentics.tokens.shell_exec_with_env", new_callable=AsyncMock) as mock_exec:
             mock_exec.return_value = "Migrations applied"
             proof = await token.consume(command="python manage.py migrate")
 
@@ -495,13 +465,9 @@ class TestDatabaseToken:
             allowed_patterns=["SELECT"],
         )
         mock_rows = [{"id": 1, "name": "alice"}]
-        with patch(
-            "linear_agentics.tokens.db_query", new_callable=AsyncMock
-        ) as mock_db:
+        with patch("linear_agentics.tokens.db_query", new_callable=AsyncMock) as mock_db:
             mock_db.return_value = mock_rows
-            proof = await token.consume(
-                query="SELECT * FROM users WHERE id = $1", params=[1]
-            )
+            proof = await token.consume(query="SELECT * FROM users WHERE id = $1", params=[1])
             mock_db.assert_called_once_with(
                 "postgres://localhost/test",
                 "SELECT * FROM users WHERE id = $1",
@@ -518,9 +484,7 @@ class TestDatabaseToken:
             await token.consume(query="SELECT 1")
 
     def test_to_tool_definition(self):
-        token = DatabaseToken(
-            "db", dsn="postgres://x", allowed_patterns=["SELECT", "INSERT"]
-        )
+        token = DatabaseToken("db", dsn="postgres://x", allowed_patterns=["SELECT", "INSERT"])
         tool_def = token.to_tool_definition()
         assert tool_def["name"] == "db_db"
         assert "ONE USE ONLY" in tool_def["description"]
@@ -537,9 +501,7 @@ class TestDatabaseToken:
         token._consumed = True
 
     def test_dsn_not_in_tool_definition(self):
-        token = DatabaseToken(
-            "db", dsn="postgres://user:pass@host/db", allowed_patterns=["SELECT"]
-        )
+        token = DatabaseToken("db", dsn="postgres://user:pass@host/db", allowed_patterns=["SELECT"])
         tool_def = token.to_tool_definition()
         assert "postgres://" not in str(tool_def)
         token._consumed = True
@@ -553,9 +515,7 @@ class TestMultiUseDatabaseToken:
             allowed_patterns=["SELECT"],
             max_uses=3,
         )
-        with patch(
-            "linear_agentics.tokens.db_query", new_callable=AsyncMock
-        ) as mock_db:
+        with patch("linear_agentics.tokens.db_query", new_callable=AsyncMock) as mock_db:
             mock_db.return_value = [{"count": 42}]
             await token.consume(query="SELECT count(*) FROM users")
             assert token.uses_remaining == 2
@@ -571,9 +531,7 @@ class TestMultiUseDatabaseToken:
             allowed_patterns=["SELECT"],
             max_uses=1,
         )
-        with patch(
-            "linear_agentics.tokens.db_query", new_callable=AsyncMock
-        ) as mock_db:
+        with patch("linear_agentics.tokens.db_query", new_callable=AsyncMock) as mock_db:
             mock_db.return_value = []
             await token.consume(query="SELECT 1")
             with pytest.raises(TokenReusedError, match="exhausted"):
@@ -586,9 +544,7 @@ class TestWaitToken:
         return WaitToken("pause", max_seconds=60)
 
     async def test_consume_sleeps(self, wait_token):
-        with patch(
-            "linear_agentics.tokens.asyncio.sleep", new_callable=AsyncMock
-        ) as mock_sleep:
+        with patch("linear_agentics.tokens.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
             proof = await wait_token.consume(seconds=5, reason="waiting for deploy")
             mock_sleep.assert_called_once_with(5)
         assert "Waited 5s" in proof.result_summary

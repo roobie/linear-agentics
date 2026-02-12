@@ -110,9 +110,7 @@ class AuditTrail:
         for i, p in enumerate(self.proofs, 1):
             dur = f"{p.duration_ms:.0f}ms"
             summary = p.result_summary[:30] if p.result_summary else ""
-            lines.append(
-                f"{i:<4} {p.token_name:<25} {p.scope:<20} {dur:>10}  {summary}"
-            )
+            lines.append(f"{i:<4} {p.token_name:<25} {p.scope:<20} {dur:>10}  {summary}")
         if self.negotiations:
             lines.append("")
             lines.append("Negotiations:")

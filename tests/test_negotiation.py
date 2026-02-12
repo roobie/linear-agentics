@@ -90,9 +90,7 @@ class TestHumanCapabilityProvider:
         provider = HumanCapabilityProvider()
 
         with patch("linear_agentics.negotiation.input", return_value="1"):
-            result = await provider.request_capability(
-                "shell:echo", "need diagnostics", [token]
-            )
+            result = await provider.request_capability("shell:echo", "need diagnostics", [token])
 
         assert result is token
         token._consumed = True
@@ -102,9 +100,7 @@ class TestHumanCapabilityProvider:
         provider = HumanCapabilityProvider()
 
         with patch("linear_agentics.negotiation.input", return_value="0"):
-            result = await provider.request_capability(
-                "shell:echo", "need diagnostics", [token]
-            )
+            result = await provider.request_capability("shell:echo", "need diagnostics", [token])
 
         assert result is None
         token._consumed = True
@@ -114,9 +110,7 @@ class TestHumanCapabilityProvider:
         provider = HumanCapabilityProvider()
 
         with patch("linear_agentics.negotiation.input", return_value="abc"):
-            result = await provider.request_capability(
-                "shell:echo", "need diagnostics", [token]
-            )
+            result = await provider.request_capability("shell:echo", "need diagnostics", [token])
 
         assert result is None
         token._consumed = True
@@ -133,9 +127,7 @@ class TestHumanCapabilityProvider:
         provider = HumanCapabilityProvider()
 
         with patch("linear_agentics.negotiation.input", return_value="1"):
-            result = await provider.request_capability(
-                "shell:echo", "need it", [t1, t2]
-            )
+            result = await provider.request_capability("shell:echo", "need it", [t1, t2])
 
         assert result is t2
         t2._consumed = True
@@ -171,9 +163,7 @@ class TestAgentNegotiation:
         use_call = _make_tool_response("shell_ls-cmd", {"command": "ls"}, "c2")
         done = _make_text_response("Done.")
 
-        with patch.object(
-            agent._client.messages, "create", new_callable=AsyncMock
-        ) as mock_create:
+        with patch.object(agent._client.messages, "create", new_callable=AsyncMock) as mock_create:
             mock_create.side_effect = [req_call, use_call, done]
             result = await agent.run()
 
@@ -206,9 +196,7 @@ class TestAgentNegotiation:
         )
         done = _make_text_response("Ok, working without it.")
 
-        with patch.object(
-            agent._client.messages, "create", new_callable=AsyncMock
-        ) as mock_create:
+        with patch.object(agent._client.messages, "create", new_callable=AsyncMock) as mock_create:
             mock_create.side_effect = [req_call, done]
             result = await agent.run()
 
@@ -247,9 +235,7 @@ class TestAgentNegotiation:
         )
         done = _make_text_response("Done.")
 
-        with patch.object(
-            agent._client.messages, "create", new_callable=AsyncMock
-        ) as mock_create:
+        with patch.object(agent._client.messages, "create", new_callable=AsyncMock) as mock_create:
             mock_create.side_effect = [req1, req2, done]
             result = await agent.run()
 
@@ -289,9 +275,7 @@ class TestAgentNegotiation:
 
         done = _make_text_response("Hello.")
 
-        with patch.object(
-            agent._client.messages, "create", new_callable=AsyncMock
-        ) as mock_create:
+        with patch.object(agent._client.messages, "create", new_callable=AsyncMock) as mock_create:
             mock_create.return_value = done
             await agent.run()
 
@@ -320,9 +304,7 @@ class TestAgentNegotiation:
 
         done = _make_text_response("Hello.")
 
-        with patch.object(
-            agent._client.messages, "create", new_callable=AsyncMock
-        ) as mock_create:
+        with patch.object(agent._client.messages, "create", new_callable=AsyncMock) as mock_create:
             mock_create.return_value = done
             await agent.run()
 
@@ -355,9 +337,7 @@ class TestAgentNegotiation:
         )
         done = _make_text_response("Done.")
 
-        with patch.object(
-            agent._client.messages, "create", new_callable=AsyncMock
-        ) as mock_create:
+        with patch.object(agent._client.messages, "create", new_callable=AsyncMock) as mock_create:
             mock_create.side_effect = [req_call, done]
             result = await agent.run()
 

@@ -97,7 +97,4 @@ class SupervisorAgentProvider:
         justification: str,
         candidates: list[LinearToken],
     ) -> LinearToken | None:
-        raise NotImplementedError(
-            "SupervisorAgentProvider is not yet implemented. "
-            "Use HumanCapabilityProvider for now."
-        )
+        raise NotImplementedError("SupervisorAgentProvider is not yet implemented. Use HumanCapabilityProvider for now.")

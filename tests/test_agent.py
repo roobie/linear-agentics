@@ -76,9 +76,7 @@ class TestAgent:
 
         mock_response = _make_text_response("All done!")
 
-        with patch.object(
-            agent._client.messages, "create", new_callable=AsyncMock
-        ) as mock_create:
+        with patch.object(agent._client.messages, "create", new_callable=AsyncMock) as mock_create:
             mock_create.return_value = mock_response
             result = await agent.run()
 
@@ -99,9 +97,7 @@ class TestAgent:
         tool_response = _make_tool_response("shell_echo-cmd", {"command": "echo hello"})
         text_response = _make_text_response("Done.")
 
-        with patch.object(
-            agent._client.messages, "create", new_callable=AsyncMock
-        ) as mock_create:
+        with patch.object(agent._client.messages, "create", new_callable=AsyncMock) as mock_create:
             mock_create.side_effect = [tool_response, text_response]
             result = await agent.run()
 
@@ -123,9 +119,7 @@ class TestAgent:
         call2 = _make_tool_response("shell_once", {"command": "echo 2"}, "c2")
         done = _make_text_response("Finished.")
 
-        with patch.object(
-            agent._client.messages, "create", new_callable=AsyncMock
-        ) as mock_create:
+        with patch.object(agent._client.messages, "create", new_callable=AsyncMock) as mock_create:
             mock_create.side_effect = [call1, call2, done]
             result = await agent.run()
 
@@ -144,9 +138,7 @@ class TestAgent:
 
         tool_response = _make_tool_response("shell_t1", {"command": "echo hi"})
 
-        with patch.object(
-            agent._client.messages, "create", new_callable=AsyncMock
-        ) as mock_create:
+        with patch.object(agent._client.messages, "create", new_callable=AsyncMock) as mock_create:
             mock_create.return_value = tool_response
             result = await agent.run()
 
@@ -163,9 +155,7 @@ class TestAgent:
         call = _make_tool_response("nonexistent_tool", {})
         done = _make_text_response("Ok.")
 
-        with patch.object(
-            agent._client.messages, "create", new_callable=AsyncMock
-        ) as mock_create:
+        with patch.object(agent._client.messages, "create", new_callable=AsyncMock) as mock_create:
             mock_create.side_effect = [call, done]
             result = await agent.run()
 

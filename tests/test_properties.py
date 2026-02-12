@@ -50,9 +50,7 @@ _shell_chars = st.sampled_from(list("abcdefg -='\"|&;$()` \t\\"))
 _shell_commands = st.text(alphabet=_shell_chars, min_size=1, max_size=60)
 
 # SQL-like strings
-_sql_alphabet = st.sampled_from(
-    list("SELECT INSERT FROM WHERE AND OR 0123456789 *$-;/\t\n'\"")
-)
+_sql_alphabet = st.sampled_from(list("SELECT INSERT FROM WHERE AND OR 0123456789 *$-;/\t\n'\""))
 _sql_strings = st.text(alphabet=_sql_alphabet, min_size=1, max_size=80)
 
 # General text
@@ -77,9 +75,7 @@ class TestPropertyValidateFilePath:
         resolved = os.path.realpath(test_path)
         allowed_resolved = os.path.realpath(sandbox)
 
-        is_inside = resolved == allowed_resolved or resolved.startswith(
-            allowed_resolved + os.sep
-        )
+        is_inside = resolved == allowed_resolved or resolved.startswith(allowed_resolved + os.sep)
 
         if is_inside:
             result = _validate_file_path(test_path, [sandbox])
@@ -127,9 +123,7 @@ class TestPropertyValidateAndSplit:
 
         # The critical invariant: no shell operators in the result
         for token in argv:
-            assert token not in _SHELL_OPERATORS, (
-                f"Shell operator {token!r} escaped validation in command {command!r}"
-            )
+            assert token not in _SHELL_OPERATORS, f"Shell operator {token!r} escaped validation in command {command!r}"
 
     @given(
         safe_cmd=st.text(alphabet="abcdefg -=", min_size=1, max_size=20),
@@ -193,13 +187,9 @@ class TestPropertyValidateQuery:
         ws_between=st.text(alphabet=" \t\n", min_size=1, max_size=5),
         ws_after=st.text(alphabet=" \t\n", min_size=0, max_size=5),
     )
-    def test_whitespace_normalisation_is_idempotent(
-        self, ws_before, ws_between, ws_after
-    ):
+    def test_whitespace_normalisation_is_idempotent(self, ws_before, ws_between, ws_after):
         """Whitespace variations of the same query all match the same prefix."""
-        query = (
-            f"{ws_before}SELECT{ws_between}*{ws_between}FROM{ws_between}users{ws_after}"
-        )
+        query = f"{ws_before}SELECT{ws_between}*{ws_between}FROM{ws_between}users{ws_after}"
         # Should pass — it normalizes to "SELECT * FROM users"
         _validate_query(query, ["SELECT * FROM users"])
 
@@ -231,16 +221,12 @@ class TestPropertySecretRedaction:
             injection=SecretInjection(kind="header", key="Auth"),
             inner_token=inner,
         )
-        with patch(
-            "linear_agentics.tokens.http_request", new_callable=AsyncMock
-        ) as mock_req:
+        with patch("linear_agentics.tokens.http_request", new_callable=AsyncMock) as mock_req:
             mock_req.return_value = {"status": 200, "body": "ok"}
             proof = await token.consume(method="GET")
 
         # Secret must not be stored as a value in proof.args
-        assert secret not in proof.args.values(), (
-            f"Secret leaked as value in proof.args"
-        )
+        assert secret not in proof.args.values(), f"Secret leaked as value in proof.args"
         # Secret must not appear as a key in proof.args
         assert secret not in proof.args, f"Secret leaked as key in proof.args"
         inner._consumed = True
@@ -256,15 +242,11 @@ class TestPropertySecretRedaction:
             injection=SecretInjection(kind="env", key="SECRET"),
             inner_token=inner,
         )
-        with patch(
-            "linear_agentics.tokens.shell_exec_with_env", new_callable=AsyncMock
-        ) as mock_exec:
+        with patch("linear_agentics.tokens.shell_exec_with_env", new_callable=AsyncMock) as mock_exec:
             mock_exec.return_value = "done"
             proof = await token.consume(command="echo hello")
 
-        assert secret not in proof.args.values(), (
-            f"Secret leaked as value in proof.args"
-        )
+        assert secret not in proof.args.values(), f"Secret leaked as value in proof.args"
         assert secret not in proof.args, f"Secret leaked as key in proof.args"
         inner._consumed = True
 
@@ -383,9 +365,7 @@ class TestPropertyBudgetSpend:
 
     @given(
         max_steps=st.integers(min_value=1, max_value=100),
-        spend_amounts=st.lists(
-            st.integers(min_value=1, max_value=10), min_size=1, max_size=20
-        ),
+        spend_amounts=st.lists(st.integers(min_value=1, max_value=10), min_size=1, max_size=20),
     )
     def test_remaining_invariant(self, max_steps, spend_amounts):
         """remaining == max(0, max_steps - steps_used) at all times.
@@ -529,9 +509,7 @@ class TestPropertyAuditTrailJsonRoundtrip:
 
     @given(
         proofs=st.lists(
-            st.tuples(
-                st.text(min_size=1, max_size=10), st.text(min_size=0, max_size=20)
-            ),
+            st.tuples(st.text(min_size=1, max_size=10), st.text(min_size=0, max_size=20)),
             min_size=0,
             max_size=8,
         )
@@ -570,9 +548,7 @@ class TestPropertyCapabilitySetIndex:
         for token in tokens:
             tool_name = token.to_tool_definition()["name"]
             found = cap_set.get_token(tool_name)
-            assert found is token, (
-                f"Token {token.name} not found by tool name {tool_name}"
-            )
+            assert found is token, f"Token {token.name} not found by tool name {tool_name}"
 
         # Suppress __del__ warnings
         for t in tokens:

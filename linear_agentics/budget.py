@@ -42,23 +42,18 @@ class Budget:
     def spend(self, cost: int = 1) -> None:
         self._steps_used += cost
         if self._steps_used > self.max_steps:
-            raise BudgetExhaustedError(
-                f"Budget exhausted: {self._steps_used}/{self.max_steps} steps used"
-            )
+            raise BudgetExhaustedError(f"Budget exhausted: {self._steps_used}/{self.max_steps} steps used")
 
     def check_timeout(self) -> None:
         if self._start is None:
             return
         if self.elapsed > timedelta(minutes=self.timeout_minutes):
             raise BudgetTimeoutError(
-                f"Budget timeout: {self.elapsed.total_seconds():.0f}s elapsed, "
-                f"limit is {self.timeout_minutes * 60:.0f}s"
+                f"Budget timeout: {self.elapsed.total_seconds():.0f}s elapsed, limit is {self.timeout_minutes * 60:.0f}s"
             )
 
     def check(self) -> None:
         """Check both step budget and timeout."""
         if self._steps_used >= self.max_steps:
-            raise BudgetExhaustedError(
-                f"Budget exhausted: {self._steps_used}/{self.max_steps} steps used"
-            )
+            raise BudgetExhaustedError(f"Budget exhausted: {self._steps_used}/{self.max_steps} steps used")
         self.check_timeout()
