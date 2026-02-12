@@ -370,6 +370,78 @@ class MultiUseShellToken(MultiUseToken):
 _FILE_MODES = {"read", "write", "readwrite"}
 
 
+class _BaseFileToken:
+    """Base class for file tokens - shared logic for single and multi-use."""
+
+    def __init__(
+        self,
+        name: str,
+        allowed_paths: list[str],
+        mode: str,
+        requires_approval: bool,
+    ) -> None:
+        if mode not in _FILE_MODES:
+            raise ValueError(f"mode must be one of {_FILE_MODES}, got {mode!r}")
+        scope = f"file:{mode}:{','.join(allowed_paths)}"
+        self.name = name
+        self.scope = scope
+        self.requires_approval = requires_approval
+        self.allowed_paths = allowed_paths
+        self.mode = mode
+
+    def _allowed_operations(self) -> list[str]:
+        if self.mode == "readwrite":
+            return ["read", "write"]
+        return [self.mode]
+
+    def _validate_operation(self, operation: str) -> None:
+        allowed_ops = self._allowed_operations()
+        if operation not in allowed_ops:
+            raise TokenScopeError(
+                f"Operation {operation!r} not allowed by mode {self.mode!r}. "
+                f"Allowed: {allowed_ops}"
+            )
+
+    def _build_tool_definition(self, uses_remaining: int | None) -> dict:
+        approval_note = " REQUIRES APPROVAL." if self.requires_approval else ""
+        ops = self._allowed_operations()
+        props: dict = {
+            "operation": {
+                "type": "string",
+                "enum": ops,
+                "description": "File operation to perform",
+            },
+            "path": {
+                "type": "string",
+                "description": "Absolute path to the file",
+            },
+        }
+        if "write" in ops:
+            props["content"] = {
+                "type": "string",
+                "description": "Content to write (required for write operations)",
+            }
+        if uses_remaining is not None:
+            desc = (
+                f"File access ({self.mode}) within {self.allowed_paths}. "
+                f"{uses_remaining} uses remaining.{approval_note}"
+            )
+        else:
+            desc = (
+                f"File access ({self.mode}) within {self.allowed_paths}. "
+                f"ONE USE ONLY.{approval_note}"
+            )
+        return {
+            "name": f"file_{self.name}",
+            "description": desc,
+            "input_schema": {
+                "type": "object",
+                "properties": props,
+                "required": ["operation", "path"],
+            },
+        }
+
+
 class FileToken(LinearToken):
     """Scoped filesystem access token (single use)."""
 
@@ -380,28 +452,17 @@ class FileToken(LinearToken):
         mode: str = "read",
         requires_approval: bool = False,
     ) -> None:
-        if mode not in _FILE_MODES:
-            raise ValueError(f"mode must be one of {_FILE_MODES}, got {mode!r}")
-        scope = f"file:{mode}:{','.join(allowed_paths)}"
-        super().__init__(name, scope, requires_approval)
-        self.allowed_paths = allowed_paths
-        self.mode = mode
-
-    def _allowed_operations(self) -> list[str]:
-        if self.mode == "readwrite":
-            return ["read", "write"]
-        return [self.mode]
+        base = _BaseFileToken(name, allowed_paths, mode, requires_approval)
+        super().__init__(base.name, base.scope, requires_approval)
+        self.allowed_paths = base.allowed_paths
+        self.mode = base.mode
+        self._base = base
 
     async def consume(
         self, operation: str, path: str, content: str | None = None
     ) -> Proof:
         self._check_reuse()
-        allowed_ops = self._allowed_operations()
-        if operation not in allowed_ops:
-            raise TokenScopeError(
-                f"Operation {operation!r} not allowed by mode {self.mode!r}. "
-                f"Allowed: {allowed_ops}"
-            )
+        self._base._validate_operation(operation)
         t0 = time.monotonic()
         if operation == "read":
             result = await file_read(path, self.allowed_paths)
@@ -416,36 +477,7 @@ class FileToken(LinearToken):
         )
 
     def to_tool_definition(self) -> dict:
-        approval_note = " REQUIRES APPROVAL." if self.requires_approval else ""
-        ops = self._allowed_operations()
-        props: dict = {
-            "operation": {
-                "type": "string",
-                "enum": ops,
-                "description": "File operation to perform",
-            },
-            "path": {
-                "type": "string",
-                "description": "Absolute path to the file",
-            },
-        }
-        if "write" in ops:
-            props["content"] = {
-                "type": "string",
-                "description": "Content to write (required for write operations)",
-            }
-        return {
-            "name": f"file_{self.name}",
-            "description": (
-                f"File access ({self.mode}) within {self.allowed_paths}. "
-                f"ONE USE ONLY.{approval_note}"
-            ),
-            "input_schema": {
-                "type": "object",
-                "properties": props,
-                "required": ["operation", "path"],
-            },
-        }
+        return self._base._build_tool_definition(None)
 
 
 class MultiUseFileToken(MultiUseToken):
@@ -459,28 +491,17 @@ class MultiUseFileToken(MultiUseToken):
         max_uses: int = 5,
         requires_approval: bool = False,
     ) -> None:
-        if mode not in _FILE_MODES:
-            raise ValueError(f"mode must be one of {_FILE_MODES}, got {mode!r}")
-        scope = f"file:{mode}:{','.join(allowed_paths)}"
-        super().__init__(name, scope, max_uses, requires_approval)
-        self.allowed_paths = allowed_paths
-        self.mode = mode
-
-    def _allowed_operations(self) -> list[str]:
-        if self.mode == "readwrite":
-            return ["read", "write"]
-        return [self.mode]
+        base = _BaseFileToken(name, allowed_paths, mode, requires_approval)
+        super().__init__(base.name, base.scope, max_uses, requires_approval)
+        self.allowed_paths = base.allowed_paths
+        self.mode = base.mode
+        self._base = base
 
     async def consume(
         self, operation: str, path: str, content: str | None = None
     ) -> Proof:
         self._check_reuse()
-        allowed_ops = self._allowed_operations()
-        if operation not in allowed_ops:
-            raise TokenScopeError(
-                f"Operation {operation!r} not allowed by mode {self.mode!r}. "
-                f"Allowed: {allowed_ops}"
-            )
+        self._base._validate_operation(operation)
         t0 = time.monotonic()
         if operation == "read":
             result = await file_read(path, self.allowed_paths)
@@ -495,36 +516,7 @@ class MultiUseFileToken(MultiUseToken):
         )
 
     def to_tool_definition(self) -> dict:
-        approval_note = " REQUIRES APPROVAL." if self.requires_approval else ""
-        ops = self._allowed_operations()
-        props: dict = {
-            "operation": {
-                "type": "string",
-                "enum": ops,
-                "description": "File operation to perform",
-            },
-            "path": {
-                "type": "string",
-                "description": "Absolute path to the file",
-            },
-        }
-        if "write" in ops:
-            props["content"] = {
-                "type": "string",
-                "description": "Content to write (required for write operations)",
-            }
-        return {
-            "name": f"file_{self.name}",
-            "description": (
-                f"File access ({self.mode}) within {self.allowed_paths}. "
-                f"{self.uses_remaining} uses remaining.{approval_note}"
-            ),
-            "input_schema": {
-                "type": "object",
-                "properties": props,
-                "required": ["operation", "path"],
-            },
-        }
+        return self._base._build_tool_definition(self.uses_remaining)
 
 
 # ---------------------------------------------------------------------------

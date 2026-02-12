@@ -12,7 +12,7 @@
 - [x] ~~Missing `__init__.py` exports~~ - No public API defined in `linear_agentics/__init__.py`.
 - [ ] No connection pooling - `actions.py:103` creates a new `httpx.AsyncClient` per request. Reuse clients for better performance.
 - [ ] Hardcoded LLM provider (`agent.py:96`) - Only supports Anthropic. Consider an abstract `LLMClient` protocol for flexibility.
-- [ ] Duplicated file token logic - `FileToken` and `MultiUseFileToken` share ~80% identical code. Extract to a base class.
+- [x] ~~Duplicated file token logic~~ - `FileToken` and `MultiUseFileToken` share ~80% identical code. Extract to a base class.
 
 ## Testing
 
