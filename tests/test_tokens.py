@@ -576,3 +576,74 @@ class TestWaitToken:
         assert schema["properties"]["seconds"]["type"] == "integer"
         assert "reason" in schema["properties"]
         assert schema["required"] == ["seconds"]
+
+
+class TestLinearToken:
+    def test_base_token_not_consumed_initially(self):
+        token = LinearToken("test", "test:scope")
+        assert not token.consumed
+        assert token.proof is None
+
+    def test_base_token_consumed_property(self):
+        token = LinearToken("test", "test:scope")
+        assert token.consumed is False
+
+    def test_to_tool_definition_raises(self):
+        token = LinearToken("test", "test:scope")
+        with pytest.raises(NotImplementedError):
+            token.to_tool_definition()
+
+    async def test_consume_raises(self):
+        token = LinearToken("test", "test:scope")
+        with pytest.raises(NotImplementedError):
+            await token.consume()
+
+
+class TestTokenScopeError:
+    def test_is_token_error(self):
+        assert issubclass(TokenScopeError, Exception)
+
+    def test_can_be_raised_and_caught(self):
+        with pytest.raises(TokenScopeError):
+            raise TokenScopeError("test error")
+
+
+class TestMultiUseToken:
+    def test_init_stores_attributes(self):
+        token = MultiUseShellToken("read-logs", ["echo"], max_uses=5)
+        assert token.max_uses == 5
+        assert token.uses_remaining == 5
+
+    def test_uses_remaining_decrements(self):
+        token = MultiUseShellToken("read-logs", ["echo"], max_uses=3)
+        assert token.uses_remaining == 3
+
+        token._use_count = 1
+        assert token.uses_remaining == 2
+
+        token._use_count = 2
+        assert token.uses_remaining == 1
+
+        token._use_count = 3
+        assert token.uses_remaining == 0
+
+    def test_consumed_when_exhausted(self):
+        token = MultiUseShellToken("read-logs", ["echo"], max_uses=2)
+        assert not token.consumed
+        token._use_count = 1
+        assert not token.consumed
+        token._use_count = 2
+        assert token.consumed
+
+    def test_uses_remaining_never_negative(self):
+        token = MultiUseShellToken("read-logs", ["echo"], max_uses=2)
+        token._use_count = 10
+        assert token.uses_remaining == 0
+
+    def test_unused_token_warns(self):
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            token = MultiUseShellToken("unused", ["echo"], max_uses=3)
+            del token
+            assert len(w) == 1
+            assert "never used" in str(w[0].message)
