@@ -10,14 +10,14 @@
 - [x] ~~Duplicate `_now_iso()` function~~ - defined in `audit.py`, `approval.py`, `tokens.py`. Extract to a shared utils module.
 - [x] ~~Deprecated asyncio pattern~~ - `asyncio.get_event_loop()` is deprecated. Use `asyncio.get_running_loop()` instead.
 - [x] ~~Missing `__init__.py` exports~~ - No public API defined in `linear_agentics/__init__.py`.
-- [ ] No connection pooling - `actions.py:103` creates a new `httpx.AsyncClient` per request. Reuse clients for better performance.
+- [x] ~~No connection pooling~~ - `actions.py:103` creates a new `httpx.AsyncClient` per request. Reuse clients for better performance.
 - [ ] Hardcoded LLM provider (`agent.py:96`) - Only supports Anthropic. Consider an abstract `LLMClient` protocol for flexibility.
 - [x] ~~Duplicated file token logic~~ - `FileToken` and `MultiUseFileToken` share ~80% identical code. Extract to a base class.
 
 ## Testing
 
 - [ ] No integration tests - Tests mock everything. Add tests that exercise actual shell/DB/HTTP execution with real constraints.
-- [ ] Missing test coverage - No tests for `DeployToken`, `WaitToken`, `SecretToken`, `DatabaseToken`.
+- [x] ~~Missing test coverage~~ - No tests for `DeployToken`, `WaitToken`, `SecretToken`, `DatabaseToken`.
 
 ## Configuration & DX
 
