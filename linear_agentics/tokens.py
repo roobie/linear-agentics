@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import time
 import warnings
-from datetime import datetime, timezone
+from dataclasses import dataclass
 
 import asyncio
-from dataclasses import dataclass
 
 from .actions import (
     db_query,
@@ -18,6 +17,7 @@ from .actions import (
     shell_exec_with_env,
 )
 from .audit import Proof
+from .utils import _now_iso
 
 
 class TokenError(Exception):
@@ -30,10 +30,6 @@ class TokenReusedError(TokenError):
 
 class TokenScopeError(TokenError):
     pass
-
-
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 class LinearToken:

@@ -8,10 +8,11 @@ from dataclasses import dataclass, field
 import anthropic
 
 from .approval import ApprovalDeniedError, ApprovalGate
-from .audit import AuditTrail, NegotiationRecord, Proof, _now_iso
+from .audit import AuditTrail, NegotiationRecord, Proof
 from .budget import Budget, BudgetExhaustedError, BudgetTimeoutError
 from .negotiation import CapabilityProvider
 from .tokens import LinearToken, TokenReusedError, TokenScopeError
+from .utils import _now_iso
 
 
 @dataclass

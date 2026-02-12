@@ -4,13 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import sys
-from datetime import datetime, timezone
 
 from .audit import ApprovalRecord
-
-
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+from .utils import _now_iso
 
 
 class ApprovalDeniedError(Exception):
@@ -38,7 +34,7 @@ class ApprovalGate:
         print(f"\n{message}\n", file=sys.stderr)
         print(f"Type 'yes' to approve or 'no' to deny:", file=sys.stderr)
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         try:
             response = await asyncio.wait_for(
                 loop.run_in_executor(None, input),

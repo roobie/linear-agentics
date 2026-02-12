@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field, asdict
-from datetime import datetime, timezone
+from dataclasses import asdict, dataclass, field
+
+from .utils import _now_iso
 
 
 @dataclass(frozen=True)
@@ -61,10 +62,6 @@ class NegotiationRecord:
 
     def to_dict(self) -> dict:
         return asdict(self)
-
-
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 @dataclass

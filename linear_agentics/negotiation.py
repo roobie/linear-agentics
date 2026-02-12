@@ -7,6 +7,7 @@ import sys
 from typing import TYPE_CHECKING, Protocol
 
 from .tokens import LinearToken
+from .utils import _now_iso
 
 if TYPE_CHECKING:
     from .agent import Agent
@@ -61,7 +62,7 @@ class HumanCapabilityProvider:
         print("  0. Deny request", file=sys.stderr)
         print("\nEnter number to grant (0 to deny):", file=sys.stderr)
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         try:
             response = await asyncio.wait_for(
                 loop.run_in_executor(None, input),
