@@ -1,6 +1,12 @@
 """Linear Agent Runtime — safety rails for AI agents doing infrastructure work."""
 
-from .actions import CommandNotAllowedError, FileAccessError, QueryNotAllowedError
+from .actions import (
+    CommandNotAllowedError,
+    FileAccessError,
+    QueryNotAllowedError,
+    close_http_client,
+    get_http_client,
+)
 from .agent import Agent, AgentResult, CapabilitySet
 from .approval import ApprovalDeniedError, ApprovalGate, ApprovalTimeoutError
 from .audit import ApprovalRecord, AuditTrail, ErrorRecord, NegotiationRecord, Proof
@@ -37,12 +43,14 @@ __all__ = [
     "BudgetExhaustedError",
     "BudgetTimeoutError",
     "CapabilitySet",
+    "close_http_client",
     "CommandNotAllowedError",
     "DatabaseToken",
     "DeployToken",
     "ErrorRecord",
     "FileAccessError",
     "FileToken",
+    "get_http_client",
     "HumanCapabilityProvider",
     "HttpToken",
     "LinearToken",

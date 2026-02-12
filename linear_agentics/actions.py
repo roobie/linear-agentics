@@ -11,6 +11,28 @@ from pathlib import Path
 import httpx
 
 
+_http_client: httpx.AsyncClient | None = None
+
+
+def get_http_client(timeout: float = 30.0) -> httpx.AsyncClient:
+    """Get or create a shared HTTP client with connection pooling."""
+    global _http_client
+    if _http_client is None:
+        _http_client = httpx.AsyncClient(
+            timeout=httpx.Timeout(timeout),
+            limits=httpx.Limits(max_connections=100, max_keepalive_connections=20),
+        )
+    return _http_client
+
+
+async def close_http_client() -> None:
+    """Close the shared HTTP client. Call on application shutdown."""
+    global _http_client
+    if _http_client is not None:
+        await _http_client.aclose()
+        _http_client = None
+
+
 class CommandNotAllowedError(Exception):
     pass
 
@@ -100,13 +122,13 @@ async def http_request(
             f"HTTP method {method_upper!r} not allowed. Permitted: {allowed_methods}"
         )
 
-    async with httpx.AsyncClient(timeout=timeout_seconds) as client:
-        response = await client.request(
-            method_upper,
-            url,
-            json=body,
-            headers=headers,
-        )
+    client = get_http_client(timeout_seconds)
+    response = await client.request(
+        method_upper,
+        url,
+        json=body,
+        headers=headers,
+    )
     return {
         "status": response.status_code,
         "body": response.text,
