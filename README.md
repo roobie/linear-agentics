@@ -121,16 +121,29 @@ Generates a `kubectl set image` command scoped to the target namespace. Supports
 
 `SecretToken` wraps an inner token (`HttpToken` or `ShellToken`) and transparently injects a secret at execution time. The LLM sees the same tool interface as the inner token but never sees the secret value. The secret is also redacted from the `Proof` — it never appears in the audit trail.
 
+Secrets are fetched from a `SecretProvider` at consumption time, not at creation, enabling secret rotation without recreating tokens.
+
 ```python
-from linear_agentics.tokens import HttpToken, SecretToken, SecretInjection
+from linear_agentics.tokens import HttpToken, SecretToken, SecretInjection, EnvSecretProvider
 
 inner = HttpToken("api", url="https://api.example.com/deploy", methods=["POST"])
+provider = EnvSecretProvider()  # reads from env vars at execution time
 token = SecretToken(
     "authed-api",
-    secret_value="Bearer sk-secret-key",
+    secret_key="API_SECRET",  # env var name
     injection=SecretInjection(kind="header", key="Authorization"),
     inner_token=inner,
+    secret_provider=provider,
 )
+```
+
+Or use `KeyringSecretProvider` for OS-native secure storage:
+
+```python
+from linear_agentics.tokens import HttpToken, SecretToken, SecretInjection, KeyringSecretProvider
+
+provider = KeyringSecretProvider(service_name="my-app")
+token = SecretToken(...)
 ```
 
 Injection kinds:
@@ -266,20 +279,24 @@ capabilities = CapabilitySet([
 An agent that interacts with an external API using credentials that are never exposed to the LLM. The `SecretToken` wraps an `HttpToken` and injects the `Authorization` header at execution time. The secret never appears in the tool definition, the proof, or the audit trail.
 
 ```python
-from linear_agentics.tokens import HttpToken, SecretToken, SecretInjection
+from linear_agentics.tokens import HttpToken, SecretToken, SecretInjection, EnvSecretProvider
+
+provider = EnvSecretProvider()
 
 api_token = SecretToken(
     "github-api",
-    secret_value=f"Bearer {os.environ['GITHUB_TOKEN']}",
+    secret_key="GITHUB_TOKEN",  # env var name
     injection=SecretInjection(kind="header", key="Authorization"),
     inner_token=HttpToken("gh-deployments", url="https://api.github.com/repos/org/app/deployments", methods=["GET", "POST"]),
+    secret_provider=provider,
 )
 
 migration = SecretToken(
     "run-migration",
-    secret_value=os.environ["DATABASE_URL"],
+    secret_key="DATABASE_URL",  # env var name
     injection=SecretInjection(kind="env", key="DATABASE_URL"),
     inner_token=ShellToken("migrate", allowed=["python manage.py migrate"]),
+    secret_provider=provider,
     requires_approval=True,
 )
 ```
@@ -294,7 +311,10 @@ from linear_agentics import Agent, CapabilitySet, Budget
 from linear_agentics.tokens import (
     ShellToken, MultiUseShellToken, HttpToken, DeployToken,
     FileToken, DatabaseToken, SecretToken, SecretInjection, WaitToken,
+    EnvSecretProvider,
 )
+
+provider = EnvSecretProvider()
 
 capabilities = CapabilitySet([
     # Read deployment config from disk
@@ -309,16 +329,17 @@ capabilities = CapabilitySet([
     # Run database migration with injected credentials
     SecretToken(
         "migrate",
-        secret_value=os.environ["DATABASE_URL"],
+        secret_key="DATABASE_URL",
         injection=SecretInjection(kind="env", key="DATABASE_URL"),
         inner_token=ShellToken("migrate-cmd", allowed=["python manage.py migrate"]),
+        secret_provider=provider,
         requires_approval=True,
     ),
 
     # Read-only query to verify migration
     DatabaseToken(
         "verify-migration",
-        dsn=os.environ["DATABASE_URL"],
+        dsn="postgres://readonly:password@db.internal/prod",
         allowed_patterns=["SELECT"],
     ),
 
@@ -337,9 +358,10 @@ capabilities = CapabilitySet([
     # Notify Slack via authenticated API
     SecretToken(
         "notify-slack",
-        secret_value=os.environ["SLACK_TOKEN"],
+        secret_key="SLACK_TOKEN",
         injection=SecretInjection(kind="header", key="Authorization"),
         inner_token=HttpToken("slack", url="https://slack.com/api/chat.postMessage", methods=["POST"]),
+        secret_provider=provider,
     ),
 ])
 

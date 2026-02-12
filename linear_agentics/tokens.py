@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 import warnings
 from dataclasses import dataclass
+from typing import Protocol
 
 import asyncio
 
@@ -483,6 +484,79 @@ class MultiUseFileToken(MultiUseToken):
 # ---------------------------------------------------------------------------
 
 
+class SecretProviderError(Exception):
+    """Raised when a secret provider fails to retrieve a secret."""
+
+    pass
+
+
+class SecretProvider(Protocol):
+    """Protocol for providing secrets at runtime."""
+
+    async def get_secret(self, key: str) -> str | None:
+        """Retrieve a secret by key.
+
+        Args:
+            key: The secret identifier/key.
+
+        Returns:
+            The secret value, or None if not found.
+        """
+        ...
+
+
+class EnvSecretProvider:
+    """Secret provider that reads from environment variables at consumption time.
+
+    Secrets are fetched from environment variables when the token is consumed,
+    not when created. This allows for secret rotation without recreating tokens.
+    """
+
+    async def get_secret(self, key: str) -> str | None:
+        """Get secret from environment variable.
+
+        Args:
+            key: The environment variable name.
+
+        Returns:
+            The environment variable value, or None if not set.
+        """
+        import os
+
+        return os.environ.get(key)
+
+
+class KeyringSecretProvider:
+    """Secret provider that uses the system keyring.
+
+    Requires the 'keyring' package to be installed:
+        pip install linear-agentics[keyring]
+
+    Uses OS-native secure storage (macOS Keychain, Windows Credential Manager,
+    or Secret Service on Linux).
+    """
+
+    def __init__(self, service_name: str = "linear-agentics") -> None:
+        self.service_name = service_name
+
+    async def get_secret(self, key: str) -> str | None:
+        """Get secret from system keyring.
+
+        Args:
+            key: The key identifier (username for the credential).
+
+        Returns:
+            The password/secret from keyring, or None if not found.
+        """
+        try:
+            import keyring
+        except ImportError:
+            raise SecretProviderError(
+                "keyring package is required for KeyringSecretProvider. Install with: pip install linear-agentics[keyring]"
+            )
+        return keyring.get_password(self.service_name, key)
+
+
 @dataclass
 class SecretInjection:
     """Describes how a secret is injected into an action."""
@@ -495,37 +569,44 @@ class SecretToken(LinearToken):
     """Injects a credential into a single action without exposing it to the LLM.
 
     Wraps an inner token (HttpToken or ShellToken). The LLM sees the same
-    tool interface as the inner token, but the secret is injected
-    transparently at execution time.
+    tool interface as the inner token, but the secret is retrieved from the
+    provider at execution time and injected transparently.
+
+    The secret is fetched from the provider at consumption time, not at creation,
+    enabling secret rotation without recreating tokens.
     """
 
     def __init__(
         self,
         name: str,
-        secret_value: str,
+        secret_key: str,
         injection: SecretInjection,
         inner_token: LinearToken,
+        secret_provider: SecretProvider,
         requires_approval: bool = False,
     ) -> None:
         scope = f"secret:{injection.kind}:{injection.key}:{inner_token.scope}"
         super().__init__(name, scope, requires_approval)
-        self._secret_value = secret_value
+        self._secret_key = secret_key
         self.injection = injection
         self.inner_token = inner_token
+        self._secret_provider = secret_provider
 
     async def consume(self, **kwargs) -> Proof:
         self._check_reuse()
         t0 = time.monotonic()
 
+        secret_value = await self._secret_provider.get_secret(self._secret_key)
+        if secret_value is None:
+            raise SecretProviderError(f"Secret not found for key: {self._secret_key}")
+
         if self.injection.kind == "header":
-            # Inner token is an HttpToken — call http_request directly with
-            # the secret injected as a header.
             inner = self.inner_token
             if not isinstance(inner, HttpToken):
                 raise TokenScopeError("header injection requires an HttpToken as inner_token")
             method = kwargs.get("method") or inner.methods[0]
             body = kwargs.get("body")
-            headers = {self.injection.key: self._secret_value}
+            headers = {self.injection.key: secret_value}
             result = await http_request(
                 inner.url,
                 method,
@@ -536,13 +617,11 @@ class SecretToken(LinearToken):
             result_summary = f"HTTP {result['status']}: {result['body'][:150]}"
 
         elif self.injection.kind == "env":
-            # Inner token is a ShellToken — call shell_exec_with_env with
-            # the secret as an environment variable.
             inner = self.inner_token
             if not isinstance(inner, ShellToken):
                 raise TokenScopeError("env injection requires a ShellToken as inner_token")
             command = kwargs["command"]
-            env_vars = {self.injection.key: self._secret_value}
+            env_vars = {self.injection.key: secret_value}
             result_str = await shell_exec_with_env(
                 command,
                 inner.allowed,

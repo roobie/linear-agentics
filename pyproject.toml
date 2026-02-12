@@ -14,11 +14,15 @@ requires-python = ">=3.11"
 dependencies = [
     "anthropic>=0.40.0",
     "httpx>=0.27.0",
+    "structlog>=25.5.0",
 ]
 
 [project.optional-dependencies]
 db = [
     "asyncpg>=0.29.0",
+]
+keyring = [
+    "keyring>=25.0.0",
 ]
 dev = [
     "pytest>=8.0",

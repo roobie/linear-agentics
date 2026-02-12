@@ -9,13 +9,17 @@ import pytest
 from linear_agentics.tokens import (
     DatabaseToken,
     DeployToken,
+    EnvSecretProvider,
     FileToken,
     HttpToken,
+    KeyringSecretProvider,
     LinearToken,
     MultiUseDatabaseToken,
     MultiUseFileToken,
     MultiUseShellToken,
     SecretInjection,
+    SecretProvider,
+    SecretProviderError,
     SecretToken,
     ShellToken,
     TokenReusedError,
@@ -363,21 +367,32 @@ class TestMultiUseFileToken:
             await token.consume(operation="read", path=str(f))
 
 
+class MockSecretProvider:
+    """Mock secret provider for testing."""
+
+    def __init__(self, secrets: dict[str, str | None] | None = None) -> None:
+        self.secrets = secrets or {}
+
+    async def get_secret(self, key: str) -> str | None:
+        return self.secrets.get(key)
+
+
 class TestSecretToken:
     async def test_header_injection(self):
         inner = HttpToken("api", url="https://api.example.com", methods=["POST"])
+        provider = MockSecretProvider({"api-key": "Bearer sk-secret-123"})
         token = SecretToken(
             "authed-api",
-            secret_value="Bearer sk-secret-123",
+            secret_key="api-key",
             injection=SecretInjection(kind="header", key="Authorization"),
             inner_token=inner,
+            secret_provider=provider,
         )
         mock_result = {"status": 200, "body": "ok"}
         with patch("linear_agentics.tokens.http_request", new_callable=AsyncMock) as mock_req:
             mock_req.return_value = mock_result
             proof = await token.consume(method="POST", body={"action": "deploy"})
 
-            # Verify the header was injected
             mock_req.assert_called_once_with(
                 "https://api.example.com",
                 "POST",
@@ -386,18 +401,19 @@ class TestSecretToken:
                 headers={"Authorization": "Bearer sk-secret-123"},
             )
 
-        # Verify secret is NOT in proof
         assert "sk-secret-123" not in str(proof.args)
         assert "sk-secret-123" not in proof.result_summary
         assert "[secret injected" in proof.result_summary
 
     async def test_env_injection(self):
         inner = ShellToken("migrate", allowed=["python manage.py"])
+        provider = MockSecretProvider({"db-creds": "postgres://secret@host/db"})
         token = SecretToken(
             "authed-migrate",
-            secret_value="postgres://secret@host/db",
+            secret_key="db-creds",
             injection=SecretInjection(kind="env", key="DATABASE_URL"),
             inner_token=inner,
+            secret_provider=provider,
         )
         with patch("linear_agentics.tokens.shell_exec_with_env", new_callable=AsyncMock) as mock_exec:
             mock_exec.return_value = "Migrations applied"
@@ -413,13 +429,28 @@ class TestSecretToken:
         assert "postgres://secret@host/db" not in proof.result_summary
         assert "[secret injected" in proof.result_summary
 
-    async def test_reuse_raises(self):
+    async def test_missing_secret_raises(self):
         inner = HttpToken("api", url="https://example.com", methods=["GET"])
+        provider = MockSecretProvider({})
         token = SecretToken(
             "test",
-            secret_value="secret",
+            secret_key="missing-key",
             injection=SecretInjection(kind="header", key="X-Key"),
             inner_token=inner,
+            secret_provider=provider,
+        )
+        with pytest.raises(SecretProviderError, match="Secret not found"):
+            await token.consume(method="GET")
+
+    async def test_reuse_raises(self):
+        inner = HttpToken("api", url="https://example.com", methods=["GET"])
+        provider = MockSecretProvider({"key": "secret"})
+        token = SecretToken(
+            "test",
+            secret_key="key",
+            injection=SecretInjection(kind="header", key="X-Key"),
+            inner_token=inner,
+            secret_provider=provider,
         )
         token._consumed = True
         with pytest.raises(TokenReusedError):
@@ -427,11 +458,13 @@ class TestSecretToken:
 
     def test_to_tool_definition_mirrors_inner(self):
         inner = HttpToken("api", url="https://example.com", methods=["GET"])
+        provider = MockSecretProvider({"key": "secret"})
         token = SecretToken(
             "authed",
-            secret_value="secret",
+            secret_key="key",
             injection=SecretInjection(kind="header", key="Authorization"),
             inner_token=inner,
+            secret_provider=provider,
         )
         tool_def = token.to_tool_definition()
         inner_def = inner.to_tool_definition()
@@ -445,16 +478,44 @@ class TestSecretToken:
 
     def test_secret_not_in_tool_definition(self):
         inner = ShellToken("cmd", allowed=["echo"])
+        provider = MockSecretProvider({"key": "super-secret-value"})
         token = SecretToken(
             "s",
-            secret_value="super-secret-value",
+            secret_key="key",
             injection=SecretInjection(kind="env", key="KEY"),
             inner_token=inner,
+            secret_provider=provider,
         )
         tool_def = token.to_tool_definition()
         assert "super-secret-value" not in str(tool_def)
         token._consumed = True
         inner._consumed = True
+
+
+class TestEnvSecretProvider:
+    async def test_get_existing_var(self, monkeypatch):
+        monkeypatch.setenv("MY_API_KEY", "secret123")
+        provider = EnvSecretProvider()
+        result = await provider.get_secret("MY_API_KEY")
+        assert result == "secret123"
+
+    async def test_get_missing_var(self, monkeypatch):
+        monkeypatch.delenv("NONEXISTENT", raising=False)
+        provider = EnvSecretProvider()
+        result = await provider.get_secret("NONEXISTENT")
+        assert result is None
+
+
+class TestKeyringSecretProvider:
+    @pytest.mark.skip(reason="keyring not installed")
+    async def test_get_password(self):
+        import keyring
+
+        provider = KeyringSecretProvider(service_name="test-service")
+        with patch.object(keyring, "get_password", return_value="my-password") as mock_get:
+            result = await provider.get_secret("my-username")
+            assert result == "my-password"
+            mock_get.assert_called_once_with("test-service", "my-username")
 
 
 class TestDatabaseToken:

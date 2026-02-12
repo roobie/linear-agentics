@@ -27,6 +27,7 @@ from linear_agentics.agent import CapabilitySet
 from linear_agentics.audit import AuditTrail, Proof
 from linear_agentics.budget import Budget, BudgetExhaustedError
 from linear_agentics.tokens import (
+    EnvSecretProvider,
     HttpToken,
     MultiUseShellToken,
     SecretInjection,
@@ -209,72 +210,104 @@ class TestPropertyValidateQuery:
 class TestPropertySecretRedaction:
     """Property 4: Secret values never leak into Proof objects."""
 
-    @given(secret=st.text(min_size=8, max_size=100))
+    @given(secret=st.text(min_size=8, max_size=100).filter(lambda s: "\x00" not in s))
     @settings(max_examples=50)
     async def test_secret_never_in_proof_header_injection(self, secret):
         """The secret value never appears in proof args or result_summary
         for header injection, regardless of the secret content."""
         inner = HttpToken("api", url="https://example.com", methods=["GET"])
-        token = SecretToken(
-            "test",
-            secret_value=secret,
-            injection=SecretInjection(kind="header", key="Auth"),
-            inner_token=inner,
-        )
-        with patch("linear_agentics.tokens.http_request", new_callable=AsyncMock) as mock_req:
-            mock_req.return_value = {"status": 200, "body": "ok"}
-            proof = await token.consume(method="GET")
+        provider = EnvSecretProvider()
+        # Set the env var for the test
+        original = os.environ.get("TEST_SECRET")
+        os.environ["TEST_SECRET"] = secret
+        try:
+            token = SecretToken(
+                "test",
+                secret_key="TEST_SECRET",
+                injection=SecretInjection(kind="header", key="Auth"),
+                inner_token=inner,
+                secret_provider=provider,
+            )
+            with patch("linear_agentics.tokens.http_request", new_callable=AsyncMock) as mock_req:
+                mock_req.return_value = {"status": 200, "body": "ok"}
+                proof = await token.consume(method="GET")
 
-        # Secret must not be stored as a value in proof.args
-        assert secret not in proof.args.values(), f"Secret leaked as value in proof.args"
-        # Secret must not appear as a key in proof.args
-        assert secret not in proof.args, f"Secret leaked as key in proof.args"
+            # Secret must not be stored as a value in proof.args
+            assert secret not in proof.args.values(), f"Secret leaked as value in proof.args"
+            # Secret must not appear as a key in proof.args
+            assert secret not in proof.args, f"Secret leaked as key in proof.args"
+        finally:
+            if original is None:
+                del os.environ["TEST_SECRET"]
+            else:
+                os.environ["TEST_SECRET"] = original
         inner._consumed = True
 
-    @given(secret=st.text(min_size=8, max_size=100))
+    @given(secret=st.text(min_size=8, max_size=100).filter(lambda s: "\x00" not in s))
     @settings(max_examples=50)
     async def test_secret_never_in_proof_env_injection(self, secret):
         """The secret value never appears in proof args for env injection."""
         inner = ShellToken("cmd", allowed=["echo"])
-        token = SecretToken(
-            "test",
-            secret_value=secret,
-            injection=SecretInjection(kind="env", key="SECRET"),
-            inner_token=inner,
-        )
-        with patch("linear_agentics.tokens.shell_exec_with_env", new_callable=AsyncMock) as mock_exec:
-            mock_exec.return_value = "done"
-            proof = await token.consume(command="echo hello")
+        provider = EnvSecretProvider()
+        # Set the env var for the test
+        original = os.environ.get("TEST_SECRET")
+        os.environ["TEST_SECRET"] = secret
+        try:
+            token = SecretToken(
+                "test",
+                secret_key="TEST_SECRET",
+                injection=SecretInjection(kind="env", key="SECRET"),
+                inner_token=inner,
+                secret_provider=provider,
+            )
+            with patch("linear_agentics.tokens.shell_exec_with_env", new_callable=AsyncMock) as mock_exec:
+                mock_exec.return_value = "done"
+                proof = await token.consume(command="echo hello")
 
-        assert secret not in proof.args.values(), f"Secret leaked as value in proof.args"
-        assert secret not in proof.args, f"Secret leaked as key in proof.args"
+            assert secret not in proof.args.values(), f"Secret leaked as value in proof.args"
+            assert secret not in proof.args, f"Secret leaked as key in proof.args"
+        finally:
+            if original is None:
+                del os.environ["TEST_SECRET"]
+            else:
+                os.environ["TEST_SECRET"] = original
         inner._consumed = True
 
-    @given(secret=st.text(min_size=8, max_size=100))
+    @given(secret=st.text(min_size=8, max_size=100).filter(lambda s: "\x00" not in s))
     def test_secret_never_in_tool_definition(self, secret):
         """The secret value never appears in any tool definition field values."""
         inner = ShellToken("cmd", allowed=["echo"])
-        token = SecretToken(
-            "test",
-            secret_value=secret,
-            injection=SecretInjection(kind="env", key="KEY"),
-            inner_token=inner,
-        )
-        tool_def = token.to_tool_definition()
+        provider = EnvSecretProvider()
+        original = os.environ.get("TEST_SECRET")
+        os.environ["TEST_SECRET"] = secret
+        try:
+            token = SecretToken(
+                "test",
+                secret_key="TEST_SECRET",
+                injection=SecretInjection(kind="env", key="KEY"),
+                inner_token=inner,
+                secret_provider=provider,
+            )
+            tool_def = token.to_tool_definition()
 
-        def _check_no_secret(obj, path=""):
-            """Recursively check that secret doesn't appear in any string value."""
-            if isinstance(obj, str):
-                assert secret not in obj, f"Secret leaked at {path}: {obj!r}"
-            elif isinstance(obj, dict):
-                for k, v in obj.items():
-                    _check_no_secret(v, f"{path}.{k}")
-            elif isinstance(obj, list):
-                for i, v in enumerate(obj):
-                    _check_no_secret(v, f"{path}[{i}]")
+            def _check_no_secret(obj, path=""):
+                """Recursively check that secret doesn't appear in any String value."""
+                if isinstance(obj, str):
+                    assert secret not in obj, f"Secret leaked at {path}: {obj!r}"
+                elif isinstance(obj, dict):
+                    for k, v in obj.items():
+                        _check_no_secret(v, f"{path}.{k}")
+                elif isinstance(obj, list):
+                    for i, v in enumerate(obj):
+                        _check_no_secret(v, f"{path}[{i}]")
 
-        _check_no_secret(tool_def)
-        token._consumed = True
+            _check_no_secret(tool_def)
+            token._consumed = True
+        finally:
+            if original is None:
+                del os.environ["TEST_SECRET"]
+            else:
+                os.environ["TEST_SECRET"] = original
         inner._consumed = True
 
 
